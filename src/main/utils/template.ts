@@ -85,7 +85,9 @@ export const defaultConfig: IAppConfig = {
   testProfileOnStart: true,
   coreStartupMode: 'log',
   useHotReloadProfile: false,
-  hotReloadProfileAutoCloseConnection: false
+  hotReloadProfileAutoCloseConnection: false,
+  // 订阅新增规则默认关闭（默认开启此行为，与既有“新增规则默认关”体验一致）
+  newRulesDefaultOff: true
 }
 
 export const defaultControledMihomoConfig: Partial<IMihomoConfig> = {

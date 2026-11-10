@@ -2,11 +2,12 @@ import BasePage from '@renderer/components/base/base-page'
 import RuleItem from '@renderer/components/rules/rule-item'
 import { Virtuoso } from 'react-virtuoso'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Divider, Input, Spinner } from '@heroui/react'
+import { Button, Divider, Input, Spinner, Switch } from '@heroui/react'
 import { useRules } from '@renderer/hooks/use-rules'
 import { includesIgnoreCase } from '@renderer/utils/includes'
 import { useTranslation } from 'react-i18next'
 import { useActiveProfile } from '@renderer/hooks/use-active-profile'
+import { useAppConfig } from '@renderer/hooks/use-app-config'
 import useSWR from 'swr'
 import { MdAdd } from 'react-icons/md'
 import {
@@ -38,6 +39,7 @@ const Rules: React.FC = () => {
   const { rules, mutate } = useRules()
   const [filter, setFilter] = useState(() => localStorage.getItem(RULES_FILTER_KEY) || '')
   const { t } = useTranslation()
+  const { appConfig, patchAppConfig } = useAppConfig()
   const { isLocalActive: localMode } = useActiveProfile()
   const [editMode, setEditMode] = useState(false)
   const editing = localMode && editMode
@@ -135,8 +137,22 @@ const Rules: React.FC = () => {
           }
         })
       : rules?.rules || []
-    if (filter === '') return entries
-    return entries.filter((rule) => {
+    // 标准模式下，用户自定义出站目标的规则会被前置注入到配置最前（高优先级），
+    // 运行时列表会同时出现「注入的高优先级规则」与「订阅原规则」（同 type+payload）。
+    // 这里按 type+payload 去重，保留 index 最小（优先级最高）的条目，避免界面重复显示。
+    const deduped = !editing
+      ? (() => {
+          const map = new Map<string, IMihomoRulesDetail>()
+          for (const r of entries as IMihomoRulesDetail[]) {
+            const k = `${r.type}${r.payload ?? ''}`
+            const prev = map.get(k)
+            if (!prev || (r.index ?? 1e9) < (prev.index ?? 1e9)) map.set(k, r)
+          }
+          return Array.from(map.values())
+        })()
+      : entries
+    if (filter === '') return deduped
+    return deduped.filter((rule) => {
       return (
         includesIgnoreCase(rule.payload, filter) ||
         includesIgnoreCase(rule.type, filter) ||
@@ -171,14 +187,24 @@ const Rules: React.FC = () => {
         />
       )}
       <div className="sticky top-0 z-40 bg-background">
-        <div className="flex p-2">
+        <div className="flex items-center gap-3 p-2">
           <Input
             size="sm"
             value={filter}
             placeholder={t('rules.filter')}
             isClearable
             onValueChange={setFilter}
+            className="flex-1"
           />
+          <Switch
+            size="sm"
+            isSelected={appConfig?.newRulesDefaultOff !== false}
+            onValueChange={(v) => {
+              void patchAppConfig({ newRulesDefaultOff: v })
+            }}
+          >
+            {t('rules.newRulesDefaultOff')}
+          </Switch>
         </div>
         <Divider />
       </div>

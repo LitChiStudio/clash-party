@@ -29,6 +29,7 @@ import { atomicWriteFile } from '../utils/safeFile'
 import { compileLocalRuntime } from '../local/service'
 import { isLocalProfile } from '../../shared/local-config'
 import { evaluateDnsOverrideGuard, type DnsOverrideGuardResult } from './dnsOverrideGuard'
+import { applyRuleTargets } from './ruleTargets'
 
 const factoryLogger = createLogger('Factory')
 const SMART_OVERRIDE_ID = 'smart-core-override'
@@ -185,11 +186,13 @@ export async function generateProfile(
     ageSecretKey
   )
   const profileWithRuleOverride = await applyRuleOverride(profileId, profileWithNormalOverride)
-  const currentProfile = await applyOverrides(
+  const currentProfile0 = await applyOverrides(
     profileWithRuleOverride,
     overrideIds.smart,
     ageSecretKey
   )
+  // 注入用户自定义的规则出站目标（直接替换对应规则的目标，不新增重复条目）
+  const currentProfile = await applyRuleTargets(currentProfile0, profileId ?? undefined)
 
   // 根据开关状态过滤控制配置
   controledMihomoConfig = { ...controledMihomoConfig }

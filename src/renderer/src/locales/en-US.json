@@ -711,6 +711,12 @@
   "connections.active": "Active",
   "connections.closed": "Closed",
   "connections.filter": "Filter",
+    "connections.outbound": "Outbound",
+    "connections.outbound.all": "All",
+    "connections.outbound.proxy": "Proxy only",
+    "connections.outbound.direct": "DIRECT only",
+    "connections.ruleFilter": "Rule",
+    "connections.ruleAll": "All rules",
   "connections.orderBy": "Order By",
   "connections.time": "Time",
   "connections.uploadAmount": "Up Amount",
@@ -903,5 +909,6 @@
   "profiles.editInfo.source.group": "Proxy Provider",
   "profiles.editInfo.source.nodes": "Individual Nodes",
   "profiles.saveDraft": "Save Draft",
-  "profiles.publish": "Publish"
+  "profiles.publish": "Publish",
+  "rules.newRulesDefaultOff": "New rules default off"
 }

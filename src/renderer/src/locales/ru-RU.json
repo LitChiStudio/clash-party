@@ -886,5 +886,6 @@
   "profiles.editInfo.source.group": "Прокси-провайдер",
   "profiles.editInfo.source.nodes": "Отдельные узлы",
   "profiles.saveDraft": "Сохранить черновик",
-  "profiles.publish": "Опубликовать"
+  "profiles.publish": "Опубликовать",
+  "rules.newRulesDefaultOff": "Новые правила отключены по умолчанию"
 }

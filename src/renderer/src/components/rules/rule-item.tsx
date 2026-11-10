@@ -1,9 +1,89 @@
-import { Button, Card, CardBody, Chip, Switch } from '@heroui/react'
+import { Button, Card, CardBody, Chip, Select, SelectItem, Switch } from '@heroui/react'
 import { MdEdit } from 'react-icons/md'
-import React, { useState, useEffect } from 'react'
-import { mihomoRulesDisable } from '@renderer/utils/ipc'
+import React, { useState, useEffect, useMemo } from 'react'
+import {
+  mihomoRuleSetDisabled,
+  mihomoRuleSetTarget,
+  mihomoRuleGetTarget,
+  mihomoProxies
+} from '@renderer/utils/ipc'
+import { ruleIdentity } from '../../../../shared/rule-identity'
 import { useTranslation } from 'react-i18next'
+import useSWR from 'swr'
 import DeleteResourceButton from '../local/delete-resource-button'
+
+// 固定代理组名：与 override 中追加的分组名保持一致（修改分组名时需同步此处）。
+const FIXED_GROUP_NAME = '本机固定组'
+
+// 出站目标下拉：候选为内核所有代理/分组名（含订阅分组与「本机固定组」）。
+// 显示值以磁盘 rule-targets.json 为唯一真相源（useSWR 读回），不再依赖父组件 current，
+// 避免受控 Select 在异步写入期间因父级未刷新而回弹到订阅原目标。
+const ProxyTargetSelect: React.FC<{ type: string; payload: string; current: string }> = ({
+  type,
+  payload,
+  current
+}) => {
+  const { data } = useSWR('mihomoProxies', mihomoProxies)
+  const savedKey = `ruleTarget:${type}:${payload}`
+  const { data: saved, mutate: mutateSaved } = useSWR<string | undefined>(
+    savedKey,
+    () => mihomoRuleGetTarget(type, payload),
+    { revalidateOnFocus: false }
+  )
+  const [local, setLocal] = useState<string | undefined>(undefined)
+  const [pending, setPending] = useState(false)
+
+  const proxies = useMemo(() => (data ? Object.keys(data.proxies) : []), [data])
+
+  // 排序：固定组置顶（用户要求），其次默认（订阅），其余代理/分组按内核返回顺序。
+  const items = useMemo(() => {
+    const others = proxies.filter((p) => p !== FIXED_GROUP_NAME)
+    const top = proxies.includes(FIXED_GROUP_NAME) ? [FIXED_GROUP_NAME] : []
+    return [
+      ...top.map((p) => ({ key: p, name: p })),
+      { key: '__DEFAULT__', name: '默认（订阅）' },
+      ...others.map((p) => ({ key: p, name: p }))
+    ]
+  }, [proxies])
+
+  // 当前选中：本地乐观值 > 已存盘值 > 父级 current > 默认
+  const selected = local ?? saved ?? (current || '__DEFAULT__')
+
+  const onChange = async (val: string): Promise<void> => {
+    if (!val || val === selected) return
+    setLocal(val)
+    setPending(true)
+    try {
+      await mihomoRuleSetTarget(type, payload, val)
+      await mutateSaved()
+    } catch (error) {
+      console.error('Failed to set rule target:', error)
+      setLocal(undefined) // 失败回滚到存盘值
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Select
+      size="sm"
+      variant="flat"
+      selectedKeys={new Set([selected])}
+      onSelectionChange={(keys) => {
+        const v = Array.from(keys as Set<string>)[0]
+        if (v) void onChange(v)
+      }}
+      isLoading={pending}
+      disableSelectorIconRotation
+      aria-label="出站目标"
+      className="w-40 min-w-32 shrink-0"
+      classNames={{ trigger: 'min-h-7 h-7' }}
+      items={items}
+    >
+      {(item) => <SelectItem key={item.key}>{item.name}</SelectItem>}
+    </Select>
+  )
+}
 
 interface RuleItemProps extends IMihomoRulesDetail {
   index: number
@@ -25,7 +105,7 @@ const RuleItem: React.FC<RuleItemProps> = (props) => {
   const handleToggle = async (v: boolean): Promise<void> => {
     setIsEnabled(v)
     try {
-      await mihomoRulesDisable({ [ruleIndex]: !v })
+      await mihomoRuleSetDisabled(ruleIdentity(type, payload, proxy), ruleIndex, !v)
     } catch (error) {
       console.error('Failed to toggle rule:', error)
       setIsEnabled(!v)
@@ -110,6 +190,7 @@ const RuleItem: React.FC<RuleItemProps> = (props) => {
                       <Chip size="sm" variant="flat" color="primary" className="text-xs">
                         {rate.toFixed(1)}%
                       </Chip>
+                      <ProxyTargetSelect type={type} payload={payload ?? ''} current={proxy} />
                     </div>
                     <Switch
                       size="sm"

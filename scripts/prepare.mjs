@@ -532,7 +532,8 @@ const tasks = [
   {
     name: 'font',
     func: resolveFont,
-    retry: 5
+    retry: 5,
+    optional: true
   },
   {
     name: 'enableLoopback',
@@ -565,7 +566,8 @@ const tasks = [
     name: '7zip',
     func: resolve7zip,
     retry: 5,
-    winOnly: true
+    winOnly: true,
+    optional: true
   },
   {
     name: 'helper',

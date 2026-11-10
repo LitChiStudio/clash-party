@@ -903,5 +903,6 @@
   "profiles.editInfo.source.group": "代理集合",
   "profiles.editInfo.source.nodes": "獨立節點",
   "profiles.saveDraft": "儲存草稿",
-  "profiles.publish": "發布"
+  "profiles.publish": "發布",
+  "rules.newRulesDefaultOff": "新增規則預設關閉"
 }

@@ -470,6 +470,19 @@ export const mihomoHotReloadConfig = async (): Promise<void> => {
   }
   mihomoApiLogger.info('hot reload config completed')
   try {
+    const { applyRuleSwitches } = await import('./ruleSwitches')
+    await applyRuleSwitches()
+  } catch (e) {
+    mihomoApiLogger.warn('还原规则开关失败', e)
+  }
+  // 还原禁用态后通知渲染层刷新，使 UI 反映已还原的开关状态
+  try {
+    const { mainWindow } = await import('../window')
+    mainWindow?.webContents.send('rulesUpdated')
+  } catch {
+    /* 忽略 */
+  }
+  try {
     await syncControlDnsAfterApply(dnsGuard)
   } catch (error) {
     mihomoApiLogger.warn('Failed to sync DNS override state after hot reload', error)

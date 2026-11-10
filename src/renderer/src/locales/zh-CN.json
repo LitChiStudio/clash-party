@@ -711,6 +711,12 @@
   "connections.active": "活动中",
   "connections.closed": "已关闭",
   "connections.filter": "筛选过滤",
+    "connections.outbound": "出站",
+    "connections.outbound.all": "全部",
+    "connections.outbound.proxy": "仅代理",
+    "connections.outbound.direct": "仅DIRECT",
+    "connections.ruleFilter": "规则",
+    "connections.ruleAll": "全部规则",
   "connections.orderBy": "连接排序方式",
   "connections.time": "时间",
   "connections.uploadAmount": "上传量",
@@ -903,5 +909,6 @@
   "profiles.editInfo.source.group": "代理集合",
   "profiles.editInfo.source.nodes": "独立节点",
   "profiles.saveDraft": "保存草稿",
-  "profiles.publish": "发布"
+  "profiles.publish": "发布",
+  "rules.newRulesDefaultOff": "新增规则默认关闭"
 }

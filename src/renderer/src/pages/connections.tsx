@@ -43,6 +43,10 @@ const Connections: React.FC = () => {
   const { controledMihomoConfig } = useControledMihomoConfig()
   const { 'find-process-mode': findProcessMode = 'always' } = controledMihomoConfig || {}
   const [filter, setFilter] = useState(() => localStorage.getItem(CONNECTIONS_FILTER_KEY) || '')
+  const [outbound, setOutbound] = useState<'all' | 'proxy' | 'direct'>(
+    () => (localStorage.getItem('connections-outbound') as 'all' | 'proxy' | 'direct') || 'all'
+  )
+  const [ruleFilter, setRuleFilter] = useState('')
   const { appConfig, patchAppConfig } = useAppConfig()
   const appConfigValues: Partial<IAppConfig> = appConfig ?? {}
   const {
@@ -85,6 +89,10 @@ const Connections: React.FC = () => {
   }, [filter])
 
   useEffect(() => {
+    localStorage.setItem('connections-outbound', outbound)
+  }, [outbound])
+
+  useEffect(() => {
     setViewMode(connectionViewMode)
   }, [connectionViewMode])
 
@@ -118,16 +126,43 @@ const Connections: React.FC = () => {
     [patchAppConfig]
   )
 
+  const ruleKeyOf = (c: IMihomoConnectionDetail): string => `${c.rule}::${c.rulePayload ?? ''}`
+  const ruleLabelOf = (c: IMihomoConnectionDetail): string =>
+    `${c.rule}${c.rulePayload ? `(${c.rulePayload})` : ''}`
+
+  // 当前标签页连接里实际命中的规则名（去重），用于「规则」下拉
+  const ruleOptions = useMemo(() => {
+    const conns = tab === 'active' ? activeConnections : closedConnections
+    const map = new Map<string, string>()
+    for (const c of conns) map.set(ruleKeyOf(c), ruleLabelOf(c))
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'zh-Hans-CN'))
+  }, [activeConnections, closedConnections, tab])
+
   const filteredConnections = useMemo(() => {
     const connections = tab === 'active' ? activeConnections : closedConnections
 
-    const filtered =
+    let filtered =
       filter === ''
         ? connections
         : connections.filter((connection) => {
             const raw = JSON.stringify(connection)
             return includesIgnoreCase(raw, filter)
           })
+
+    // 出站筛选：按代理链末位（实际出口）判断是否为 DIRECT
+    if (outbound !== 'all') {
+      filtered = filtered.filter((c) => {
+        const chains = c.chains || []
+        const last = chains[chains.length - 1]
+        const isDirect = last === 'DIRECT'
+        return outbound === 'direct' ? isDirect : !isDirect
+      })
+    }
+
+    // 规则筛选：按命中的规则（类型 + payload）精确匹配
+    if (ruleFilter) {
+      filtered = filtered.filter((c) => ruleKeyOf(c) === ruleFilter)
+    }
 
     if (viewMode === 'list' && connectionOrderBy) {
       return [...filtered].sort((a, b) => {
@@ -159,6 +194,8 @@ const Connections: React.FC = () => {
     closedConnections,
     tab,
     filter,
+    outbound,
+    ruleFilter,
     connectionDirection,
     connectionOrderBy,
     viewMode
@@ -426,6 +463,45 @@ const Connections: React.FC = () => {
             isClearable
             onValueChange={setFilter}
           />
+
+          {/* 出站筛选：全部 / 仅代理 / 仅DIRECT（按代理链末位判断） */}
+          <Select
+            size="sm"
+            className="w-40 min-w-32"
+            classNames={{ popoverContent: 'min-w-32' }}
+            aria-label={t('connections.outbound')}
+            selectedKeys={[outbound]}
+            disallowEmptySelection
+            onSelectionChange={(keys) => {
+              const v = Array.from(keys as Set<string>)[0]
+              if (v) setOutbound(v as 'all' | 'proxy' | 'direct')
+            }}
+          >
+            <SelectItem key="all">{t('connections.outbound.all')}</SelectItem>
+            <SelectItem key="proxy">{t('connections.outbound.proxy')}</SelectItem>
+            <SelectItem key="direct">{t('connections.outbound.direct')}</SelectItem>
+          </Select>
+
+          {/* 规则筛选：按当前连接实际命中的规则名过滤 */}
+          <Select
+            size="sm"
+            className="w-64 min-w-52"
+            classNames={{ popoverContent: 'min-w-52' }}
+            aria-label={t('connections.ruleFilter')}
+            selectedKeys={[ruleFilter || 'ALL']}
+            onSelectionChange={(keys) => {
+              const v = Array.from(keys as Set<string>)[0] ?? 'ALL'
+              setRuleFilter(v === 'ALL' ? '' : v)
+            }}
+            isDisabled={ruleOptions.length === 0}
+            items={[['ALL', t('connections.ruleAll')], ...ruleOptions]}
+          >
+            {([key, label]: [string, string]) => (
+              <SelectItem key={key} className="truncate">
+                {label}
+              </SelectItem>
+            )}
+          </Select>
 
           {viewMode === 'table' && (
             <Dropdown>

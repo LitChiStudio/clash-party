@@ -713,6 +713,14 @@ function setupCoreListeners(
     try {
       await patchMihomoConfig({ 'log-level': logLevel })
     } finally {
+      // 必须先还原规则禁用态，再通知渲染层刷新；否则渲染层会在禁用态下发前
+      // 重拉到“全开”状态，导致开关看起来“被重置为打开”。
+      try {
+        const { applyRuleSwitches } = await import('../core/ruleSwitches')
+        await applyRuleSwitches()
+      } catch (e) {
+        managerLogger.warn('还原规则开关失败', e)
+      }
       mainWindow?.webContents.send('groupsUpdated')
       mainWindow?.webContents.send('rulesUpdated')
     }

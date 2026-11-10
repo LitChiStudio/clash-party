@@ -431,6 +431,8 @@ interface IAppConfig {
   testProfileOnStart?: boolean
   useHotReloadProfile?: boolean
   hotReloadProfileAutoCloseConnection?: boolean
+  // 订阅更新引入的新规则是否默认关闭（关闭开关态）。默认 true = 新增规则默认关。
+  newRulesDefaultOff?: boolean
 }
 
 interface IMihomoTunConfig {

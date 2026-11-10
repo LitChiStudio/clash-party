@@ -27,6 +27,8 @@ import {
   mihomoSmartFlushCache,
   mihomoRulesDisable
 } from '../core/mihomoApi'
+import { mihomoRuleSetDisabled } from '../core/ruleSwitches'
+import { mihomoRuleSetTarget, getRuleTarget } from '../core/ruleTargets'
 import { checkAutoRun, disableAutoRun, enableAutoRun } from '../sys/autoRun'
 import {
   getAppConfig,
@@ -266,6 +268,9 @@ const asyncHandlers: Record<string, AsyncFn> = {
   mihomoCloseAllConnections,
   mihomoRules,
   mihomoRulesDisable,
+  mihomoRuleSetDisabled,
+  mihomoRuleSetTarget,
+  getRuleTarget,
   queryTrafficUsageOverview,
   queryTrafficUsageBreakdown,
   importTrafficUsage,

@@ -880,5 +880,6 @@
   "profiles.editInfo.source.group": "مجموعه پروکسی",
   "profiles.editInfo.source.nodes": "گره‌های جداگانه",
   "profiles.saveDraft": "ذخیره پیش‌نویس",
-  "profiles.publish": "انتشار"
+  "profiles.publish": "انتشار",
+  "rules.newRulesDefaultOff": "قواعد جدید به‌طور پیش‌فرض غیرفعال"
 }

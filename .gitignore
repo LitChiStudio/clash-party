@@ -12,3 +12,8 @@ party.md
 CLAUDE.md
 agent.md
 tsconfig.node.tsbuildinfo
+
+# build temp backups (generated during local builds, not source)
+dist_bak*
+out_bak*
+electron.vite.config.*.mjs
