@@ -363,7 +363,7 @@ export async function validateTunPermissionsOnStartup(
     )
     await patchControledMihomoConfig({ tun: { enable: false } })
 
-    const { mainWindow } = await import('../index')
+    const { mainWindow } = await import('../window')
     mainWindow?.webContents.send('controledMihomoConfigUpdated')
     ipcMain.emit('updateTrayMenu')
 
@@ -392,7 +392,7 @@ export async function checkAdminRestartForTun(restartCore: () => Promise<void>):
 
           managerLogger.info('TUN mode auto-enabled after admin restart')
 
-          const { mainWindow } = await import('../index')
+          const { mainWindow } = await import('../window')
           mainWindow?.webContents.send('controledMihomoConfigUpdated')
           ipcMain.emit('updateTrayMenu')
         } else {

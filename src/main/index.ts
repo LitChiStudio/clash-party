@@ -25,14 +25,7 @@ import { startMonitor } from './resolve/trafficMonitor'
 import { showFloatingWindow } from './resolve/floatingWindow'
 import { logger, createLogger } from './utils/logger'
 import { initWebdavBackupScheduler } from './resolve/backup'
-import {
-  createWindow,
-  mainWindow,
-  markInitialRendererReady,
-  showMainWindow,
-  triggerMainWindow,
-  closeMainWindow
-} from './window'
+import { createWindow, mainWindow, markInitialRendererReady, showMainWindow } from './window'
 import { findDeepLink, handleDeepLink } from './deeplink'
 import { findPluginFile, readPluginFile } from './resolve/plugin/file'
 import {
@@ -106,8 +99,6 @@ process.on('uncaughtException', (error: unknown) => {
   crashGuardLogger.error('未捕获异常（按默认行为退出进程）:', error)
   throw error
 })
-
-export { mainWindow, showMainWindow, triggerMainWindow, closeMainWindow }
 
 const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
