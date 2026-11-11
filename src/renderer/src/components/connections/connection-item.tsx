@@ -16,6 +16,7 @@ interface Props {
   setSelected: React.Dispatch<React.SetStateAction<IMihomoConnectionDetail | undefined>>
   setIsDetailModalOpen: React.Dispatch<React.SetStateAction<boolean>>
   close: (id: string) => void
+  onContextMenu: (event: React.MouseEvent, connection: IMihomoConnectionDetail) => void
 }
 
 const ConnectionItemComponent: React.FC<Props> = ({
@@ -25,6 +26,7 @@ const ConnectionItemComponent: React.FC<Props> = ({
   iconUrl,
   displayName,
   close,
+  onContextMenu,
   setSelected,
   setIsDetailModalOpen
 }) => {
@@ -89,7 +91,13 @@ const ConnectionItemComponent: React.FC<Props> = ({
 
   return (
     <div className={`px-2 pb-2 ${index === 0 ? 'pt-2' : ''}`} style={{ minHeight: 80 }}>
-      <Card as="div" isPressable className="w-full" onPress={handleCardPress}>
+      <Card
+        as="div"
+        isPressable
+        className="w-full"
+        onPress={handleCardPress}
+        onContextMenu={(event) => onContextMenu(event, info)}
+      >
         <div className="w-full flex justify-between items-center">
           {displayIcon && (
             <div>
@@ -172,6 +180,7 @@ const ConnectionItem = memo(ConnectionItemComponent, (prevProps, nextProps) => {
     prevProps.info.metadata.processPath === nextProps.info.metadata.processPath &&
     prevProps.displayIcon === nextProps.displayIcon &&
     prevProps.displayName === nextProps.displayName &&
+    prevProps.onContextMenu === nextProps.onContextMenu &&
     prevProps.selected?.id === nextProps.selected?.id
   )
 })

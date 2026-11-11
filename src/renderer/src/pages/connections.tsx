@@ -1,7 +1,7 @@
 import { useConnectionApps, connectionAppKey } from '@renderer/hooks/use-connection-apps'
 import BasePage from '@renderer/components/base/base-page'
 import { mihomoCloseAllConnections, mihomoCloseConnection } from '@renderer/utils/ipc'
-import { Key, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Key, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Badge,
   Button,
@@ -25,6 +25,8 @@ import ConnectionTable, {
 import { Virtuoso } from 'react-virtuoso'
 import dayjs from '@renderer/utils/dayjs'
 import ConnectionDetailModal from '@renderer/components/connections/connection-detail-modal'
+import ConnectionContextMenu from '@renderer/components/connections/connection-context-menu'
+import { ConnectionDomainRouteModal } from '@renderer/components/connections/connection-domain-route'
 import { CgClose, CgTrash } from 'react-icons/cg'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import { HiSortAscending, HiSortDescending } from 'react-icons/hi'
@@ -34,17 +36,30 @@ import { includesIgnoreCase } from '@renderer/utils/includes'
 import { useTranslation } from 'react-i18next'
 import { IoMdPause, IoMdPlay } from 'react-icons/io'
 import { useControledMihomoConfig } from '@renderer/hooks/use-controled-mihomo-config'
+import {
+  connectionOutboundFilters,
+  filterConnectionsByOutbound,
+  readHiddenConnectionDomains
+} from '@renderer/utils/connection-visibility'
 
 let cachedConnections: IMihomoConnectionDetail[] = []
 const CONNECTIONS_FILTER_KEY = 'connections-filter'
+const OUTBOUND_FILTER_KEY = 'connections-outbound'
+const HIDDEN_DOMAINS_KEY = 'connections-hidden-domains'
 
 const Connections: React.FC = () => {
   const { t } = useTranslation()
   const { controledMihomoConfig } = useControledMihomoConfig()
   const { 'find-process-mode': findProcessMode = 'always' } = controledMihomoConfig || {}
   const [filter, setFilter] = useState(() => localStorage.getItem(CONNECTIONS_FILTER_KEY) || '')
-  const [outbound, setOutbound] = useState<'all' | 'proxy' | 'direct'>(
-    () => (localStorage.getItem('connections-outbound') as 'all' | 'proxy' | 'direct') || 'all'
+  const [outbound, setOutbound] = useState(
+    () =>
+      connectionOutboundFilters.find(
+        (value) => value === localStorage.getItem(OUTBOUND_FILTER_KEY)
+      ) ?? 'all'
+  )
+  const [hiddenDomains, setHiddenDomains] = useState(() =>
+    readHiddenConnectionDomains(localStorage.getItem(HIDDEN_DOMAINS_KEY))
   )
   const [ruleFilter, setRuleFilter] = useState('')
   const { appConfig, patchAppConfig } = useAppConfig()
@@ -71,6 +86,12 @@ const Connections: React.FC = () => {
   )
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
   const [selected, setSelected] = useState<IMihomoConnectionDetail>()
+  const [contextMenu, setContextMenu] = useState<{
+    connection: IMihomoConnectionDetail
+    x: number
+    y: number
+  }>()
+  const [routeDomain, setRouteDomain] = useState<string>()
   const [tab, setTab] = useState('active')
   const [isPaused, setIsPaused] = useState(false)
   const [viewMode, setViewMode] = useState<'list' | 'table'>(connectionViewMode)
@@ -89,8 +110,21 @@ const Connections: React.FC = () => {
   }, [filter])
 
   useEffect(() => {
-    localStorage.setItem('connections-outbound', outbound)
+    localStorage.setItem(OUTBOUND_FILTER_KEY, outbound)
   }, [outbound])
+
+  useEffect(() => {
+    localStorage.setItem(HIDDEN_DOMAINS_KEY, JSON.stringify([...hiddenDomains]))
+  }, [hiddenDomains])
+
+  const setDomainHidden = useCallback((domain: string, hidden: boolean): void => {
+    setHiddenDomains((previous) => {
+      const next = new Set(previous)
+      if (hidden) next.add(domain)
+      else next.delete(domain)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     setViewMode(connectionViewMode)
@@ -149,15 +183,7 @@ const Connections: React.FC = () => {
             return includesIgnoreCase(raw, filter)
           })
 
-    // 出站筛选：mihomo 的 chains 为 [实际出口, ...代理组]，chains[0] 才是真正的出口
-    // （DIRECT 或节点名），与列表中的「出站」标签一致；末位反而是代理组名
-    if (outbound !== 'all') {
-      filtered = filtered.filter((c) => {
-        const chains = c.chains || []
-        const isDirect = chains[0] === 'DIRECT'
-        return outbound === 'direct' ? isDirect : !isDirect
-      })
-    }
+    filtered = filterConnectionsByOutbound(filtered, outbound, hiddenDomains)
 
     // 规则筛选：按命中的规则（类型 + payload）精确匹配
     if (ruleFilter) {
@@ -195,6 +221,7 @@ const Connections: React.FC = () => {
     tab,
     filter,
     outbound,
+    hiddenDomains,
     ruleFilter,
     connectionDirection,
     connectionOrderBy,
@@ -304,6 +331,20 @@ const Connections: React.FC = () => {
     setSelected(connection)
     setIsDetailModalOpen(true)
   }, [])
+  const openContextMenu = useCallback(
+    (event: MouseEvent, connection: IMihomoConnectionDetail): void => {
+      event.preventDefault()
+      event.stopPropagation()
+      const { clientX, clientY } = event
+      const anchor = event.currentTarget.getBoundingClientRect()
+      setContextMenu({
+        connection,
+        x: clientX || anchor.left,
+        y: clientY || anchor.top
+      })
+    },
+    []
+  )
   const togglePause = useCallback(() => {
     setIsPaused((prev) => !prev)
   }, [])
@@ -323,13 +364,22 @@ const Connections: React.FC = () => {
           displayIcon={displayIcon && findProcessMode !== 'off'}
           displayName={displayName}
           close={closeConnection}
+          onContextMenu={openContextMenu}
           index={i}
           key={connection.id}
           info={connection}
         />
       )
     },
-    [displayIcon, connectionApps, selected, closeConnection, findProcessMode, displayAppName]
+    [
+      displayIcon,
+      connectionApps,
+      selected,
+      closeConnection,
+      openContextMenu,
+      findProcessMode,
+      displayAppName
+    ]
   )
 
   return (
@@ -412,6 +462,23 @@ const Connections: React.FC = () => {
           connection={selectedConnection}
         />
       )}
+      {contextMenu && (
+        <ConnectionContextMenu
+          key={`${contextMenu.connection.id}:${contextMenu.x}:${contextMenu.y}`}
+          {...contextMenu}
+          hiddenDomains={hiddenDomains}
+          onClose={() => setContextMenu(undefined)}
+          onOpenDetail={openConnectionDetail}
+          onOpenDomainRoute={setRouteDomain}
+          onSetDomainHidden={setDomainHidden}
+        />
+      )}
+      {routeDomain && (
+        <ConnectionDomainRouteModal
+          domain={routeDomain}
+          onClose={() => setRouteDomain(undefined)}
+        />
+      )}
       <div className="overflow-x-auto sticky top-0 z-40">
         <div className="flex p-2 gap-2">
           <Tabs
@@ -464,7 +531,6 @@ const Connections: React.FC = () => {
             onValueChange={setFilter}
           />
 
-          {/* 出站筛选：全部 / 仅代理 / 仅DIRECT（按代理链末位判断） */}
           <Select
             size="sm"
             className="w-40 min-w-32"
@@ -473,14 +539,35 @@ const Connections: React.FC = () => {
             selectedKeys={[outbound]}
             disallowEmptySelection
             onSelectionChange={(keys) => {
-              const v = Array.from(keys as Set<string>)[0]
-              if (v) setOutbound(v as 'all' | 'proxy' | 'direct')
+              if (keys === 'all') return
+              const value = connectionOutboundFilters.find((option) => keys.has(option))
+              if (value) setOutbound(value)
             }}
           >
-            <SelectItem key="all">{t('connections.outbound.all')}</SelectItem>
-            <SelectItem key="proxy">{t('connections.outbound.proxy')}</SelectItem>
-            <SelectItem key="direct">{t('connections.outbound.direct')}</SelectItem>
+            {connectionOutboundFilters.map((value) => (
+              <SelectItem key={value}>{t(`connections.outbound.${value}`)}</SelectItem>
+            ))}
           </Select>
+
+          {outbound === 'hidden' && hiddenDomains.size > 0 && (
+            <Dropdown>
+              <DropdownTrigger>
+                <Button size="sm" variant="flat" className="shrink-0">
+                  {t('connections.hidden.remove')}
+                </Button>
+              </DropdownTrigger>
+              <DropdownMenu
+                aria-label={t('connections.hidden.remove')}
+                onAction={(domain) => setDomainHidden(String(domain), false)}
+              >
+                {[...hiddenDomains].sort().map((domain) => (
+                  <DropdownItem key={domain} className="max-w-80 whitespace-normal wrap-anywhere">
+                    {domain}
+                  </DropdownItem>
+                ))}
+              </DropdownMenu>
+            </Dropdown>
+          )}
 
           {/* 规则筛选：按当前连接实际命中的规则名过滤 */}
           <Select
@@ -585,6 +672,7 @@ const Connections: React.FC = () => {
           <ConnectionTable
             connections={filteredConnections}
             onOpenDetail={openConnectionDetail}
+            onContextMenu={openContextMenu}
             close={closeConnection}
             visibleColumns={visibleColumns}
             columnWidths={connectionTableColumnWidths}

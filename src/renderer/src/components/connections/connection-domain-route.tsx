@@ -1,4 +1,12 @@
-import { Select, SelectItem } from '@heroui/react'
+import {
+  Button,
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalFooter,
+  Select,
+  SelectItem
+} from '@heroui/react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import useSWR from 'swr'
@@ -65,5 +73,35 @@ export default function ConnectionDomainRoute({ domain }: { domain: string }): R
     >
       {(item) => <SelectItem key={item.id}>{item.name}</SelectItem>}
     </Select>
+  )
+}
+
+export function ConnectionDomainRouteModal({
+  domain,
+  onClose
+}: {
+  domain: string
+  onClose: () => void
+}): React.JSX.Element {
+  const { t } = useTranslation()
+
+  return (
+    <Modal
+      isOpen
+      onOpenChange={(open) => !open && onClose()}
+      hideCloseButton
+      aria-label={t('connections.detail.domainRoute', { domain })}
+    >
+      <ModalContent>
+        <ModalBody className="pt-5 wrap-anywhere">
+          <ConnectionDomainRoute domain={domain} />
+        </ModalBody>
+        <ModalFooter>
+          <Button size="sm" variant="light" onPress={onClose}>
+            {t('connections.detail.close')}
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
   )
 }

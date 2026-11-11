@@ -11,6 +11,7 @@ type SortDirection = 'asc' | 'desc'
 interface Props {
   connections: IMihomoConnectionDetail[]
   onOpenDetail: (connection: IMihomoConnectionDetail) => void
+  onContextMenu: (event: React.MouseEvent, connection: IMihomoConnectionDetail) => void
   close: (id: string) => void
   visibleColumns: Set<string>
   onColumnWidthChange?: (widths: Record<string, number>) => void
@@ -223,6 +224,7 @@ const createColumnWidths = (savedWidths?: Record<string, number>): Record<string
 const ConnectionTable: React.FC<Props> = ({
   connections,
   onOpenDetail,
+  onContextMenu,
   close,
   visibleColumns,
   onColumnWidthChange,
@@ -361,7 +363,9 @@ const ConnectionTable: React.FC<Props> = ({
             {sortedConnections.map((connection) => (
               <tr
                 key={connection.id}
+                tabIndex={0}
                 className="border-b border-divider hover:bg-content2 cursor-pointer transition-colors h-12"
+                onContextMenu={(event) => onContextMenu(event, connection)}
                 onClick={() => {
                   onOpenDetail(connection)
                 }}
