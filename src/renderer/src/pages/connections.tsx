@@ -149,12 +149,12 @@ const Connections: React.FC = () => {
             return includesIgnoreCase(raw, filter)
           })
 
-    // 出站筛选：按代理链末位（实际出口）判断是否为 DIRECT
+    // 出站筛选：mihomo 的 chains 为 [实际出口, ...代理组]，chains[0] 才是真正的出口
+    // （DIRECT 或节点名），与列表中的「出站」标签一致；末位反而是代理组名
     if (outbound !== 'all') {
       filtered = filtered.filter((c) => {
         const chains = c.chains || []
-        const last = chains[chains.length - 1]
-        const isDirect = last === 'DIRECT'
+        const isDirect = chains[0] === 'DIRECT'
         return outbound === 'direct' ? isDirect : !isDirect
       })
     }

@@ -92,6 +92,21 @@ subscribeAppConfig((config) => setTrafficUsageEnabled(config.enableTrafficLogger
 
 const mainLogger = createLogger('Main')
 
+// 全局兜底：捕获因 WebSocket 在 CONNECTING 态被终止而触发的良性错误，
+// 避免它变成未捕获异常、弹出“A JavaScript error occurred”崩溃窗口并退出主进程。
+// 其它真实异常仍按默认行为抛出并退出，不会因此被静默吞掉。
+const crashGuardLogger = createLogger('CrashGuard')
+const BENIGN_WS_ERROR = 'WebSocket was closed before the connection was established'
+process.on('uncaughtException', (error: unknown) => {
+  const msg = error instanceof Error ? error.message : String(error)
+  if (msg.includes(BENIGN_WS_ERROR)) {
+    crashGuardLogger.warn('已吞掉良性 WebSocket 终止错误（不影响代理运行）:', msg)
+    return
+  }
+  crashGuardLogger.error('未捕获异常（按默认行为退出进程）:', error)
+  throw error
+})
+
 export { mainWindow, showMainWindow, triggerMainWindow, closeMainWindow }
 
 const gotTheLock = app.requestSingleInstanceLock()

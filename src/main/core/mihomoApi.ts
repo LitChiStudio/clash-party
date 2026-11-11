@@ -20,7 +20,7 @@ const mihomoApiLogger = createLogger('MihomoApi')
 let axiosIns: AxiosInstance | null = null
 let currentIpcPath: string = ''
 
-const MAX_RETRY = 10
+const MAX_RETRY = 100000
 const RECONNECT_INTERVAL_MS = 1000
 
 interface MihomoStreamState {
@@ -67,15 +67,27 @@ function clearStreamReconnect(stream: MihomoStreamState): void {
 }
 
 function disposeStreamSocket(ws: WebSocket): void {
+  // 关键修复：ws 处于 CONNECTING 态时调用 terminate() 会异步触发 'error' 事件
+  // （"WebSocket was closed before the connection was established"）。若该事件没有
+  // 监听器，Node 会抛出未捕获异常并直接崩溃主进程（启动期的崩溃弹窗）。
+  // 因此先挂一个吞错处理器，且【绝不在 terminate 之后移除它】——因为 'error'
+  // 是异步发射的，移除处理器会让它重新变成未捕获异常。
+  const swallowError = (): void => {}
+  ws.on('error', swallowError)
   ws.onmessage = null
   ws.onclose = null
-  ws.onerror = null
-  ws.removeAllListeners()
+  // 仅移除业务侧监听器，保留上面的 error 处理器兜底。
+  ws.removeAllListeners('message')
+  ws.removeAllListeners('close')
 
   if (ws.readyState === WebSocket.OPEN) {
     ws.close()
   } else if (ws.readyState === WebSocket.CONNECTING) {
-    ws.terminate()
+    try {
+      ws.terminate()
+    } catch {
+      // 吞掉终止期同步异常
+    }
   }
 }
 
@@ -141,10 +153,18 @@ function closeErroredStreamSocket(
 ): void {
   if (!isCurrentStream(stream, generation)) return
 
+  // 与 disposeStreamSocket 同理：CONNECTING 态 terminate() 可能触发未捕获 'error'，
+  // 先挂吞错处理器兜底（务必用 .on('error')，且后续不得移除，因错误异步发射）。
+  const swallowError = (): void => {}
+  ws.on('error', swallowError)
   if (ws.readyState === WebSocket.OPEN) {
     ws.close()
   } else if (ws.readyState === WebSocket.CONNECTING) {
-    ws.terminate()
+    try {
+      ws.terminate()
+    } catch {
+      // 吞掉终止期同步异常
+    }
   }
 }
 
@@ -563,6 +583,7 @@ const mihomoTraffic = async (): Promise<void> => {
   ws.onerror = (error): void => {
     mihomoApiLogger.error('Traffic WebSocket error', error)
     closeErroredStreamSocket(trafficStream, generation, ws)
+    scheduleStreamReconnect(trafficStream, generation, mihomoTraffic)
   }
 }
 
@@ -602,6 +623,7 @@ const mihomoMemory = async (): Promise<void> => {
 
   ws.onerror = (): void => {
     closeErroredStreamSocket(memoryStream, generation, ws)
+    scheduleStreamReconnect(memoryStream, generation, mihomoMemory)
   }
 }
 
@@ -643,6 +665,7 @@ const mihomoLogs = async (): Promise<void> => {
 
   ws.onerror = (): void => {
     closeErroredStreamSocket(logsStream, generation, ws)
+    scheduleStreamReconnect(logsStream, generation, mihomoLogs)
   }
 }
 
@@ -686,6 +709,7 @@ const mihomoConnections = async (): Promise<void> => {
 
   ws.onerror = (): void => {
     closeErroredStreamSocket(connectionsStream, generation, ws)
+    scheduleStreamReconnect(connectionsStream, generation, mihomoConnections)
   }
 }
 

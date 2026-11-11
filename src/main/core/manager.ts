@@ -59,6 +59,7 @@ import {
 import {
   cleanupSocketFile,
   cleanupWindowsNamedPipes,
+  setProtectedCorePid,
   validateWindowsPipeAccess,
   waitForCoreReady,
   verifyProcessOwner
@@ -479,21 +480,39 @@ export function cleanupCoreWatcher(): void {
   }
 }
 
-// 动态生成 IPC 路径
-export const getMihomoIpcPath = (): string => {
+// 动态生成 IPC 路径。
+// 每次核心启动生成【唯一】管道名（追加随机 token），避免重启时旧客户端句柄
+// 仍握着同名管道导致新核心 CreateNamedPipe ACCESS_DENIED。
+// 路径存在 globalThis，避免打包后多份模块副本各自缓存不一致。
+// rotateMihomoIpcPath() 会立刻写入新名字（不先清空），消除 async 间隙里
+// 懒生成出第二份名字的窗口。
+const GLOBAL_IPC_KEY = '__mihomoIpcPath'
+
+function buildMihomoIpcPath(): string {
+  const token = randomUUID().slice(0, 8)
   if (process.platform === 'win32') {
     const isAdmin = getSessionAdminStatus()
     const sessionId = process.env.SESSIONNAME || process.env.USERNAME || 'default'
     const processId = process.pid
-
     return isAdmin
-      ? `\\\\.\\pipe\\MihomoParty\\mihomo-admin-${sessionId}-${processId}`
-      : `\\\\.\\pipe\\MihomoParty\\mihomo-user-${sessionId}-${processId}`
+      ? `\\\\.\\pipe\\MihomoParty\\mihomo-admin-${sessionId}-${processId}-${token}`
+      : `\\\\.\\pipe\\MihomoParty\\mihomo-user-${sessionId}-${processId}-${token}`
   }
 
   const uid = process.getuid?.() || 'unknown'
-  const processId = process.pid
-  return `/tmp/mihomo-party-${uid}-${processId}.sock`
+  return `/tmp/mihomo-party-${uid}-${process.pid}-${token}.sock`
+}
+
+export const rotateMihomoIpcPath = (): string => {
+  const ipcPath = buildMihomoIpcPath()
+  ;(globalThis as Record<string, unknown>)[GLOBAL_IPC_KEY] = ipcPath
+  return ipcPath
+}
+
+export const getMihomoIpcPath = (): string => {
+  const cached = (globalThis as Record<string, unknown>)[GLOBAL_IPC_KEY]
+  if (typeof cached === 'string' && cached) return cached
+  return rotateMihomoIpcPath()
 }
 
 // 核心配置接口
@@ -530,6 +549,9 @@ function buildCoreEnv(safePath?: string, ageSecretKey?: string): NodeJS.ProcessE
 
 // 准备核心配置
 async function prepareCore(detached: boolean, skipStop = false): Promise<CoreConfig> {
+  // 管道名在进程内固定（由 getMihomoIpcPath 懒生成一次）。
+  // 不再每次 rotate：一旦换名，mihomoApi / 规则读取 / 连接 WebSocket 手里握的旧名
+  // 会永远 ENOENT → “规则为空、连接看不到”。孤儿核心占端口的问题改由启动时一次性清理解决。
   await ensureRuntimeFiles()
 
   const [appConfig, mihomoConfig] = await Promise.all([getAppConfig(), getControledMihomoConfig()])
@@ -567,7 +589,11 @@ async function prepareCore(detached: boolean, skipStop = false): Promise<CoreCon
   if (!skipStop && hasCoreProcess()) {
     await stopCoreInternal()
   }
-  await cleanupSocketFile()
+  // 启动前清理残留：主进程重启后上一次的核心会变成占着 7890/1053 的孤儿。
+  // 新进程里 child 为空、hasCoreProcess() 为 false，却拿不到旧核心句柄，
+  // 若不主动清理，新核心会反复 bind 失败 → Try Restart 死循环（实测 97 次、约 2 分钟）。
+  // 仅在确认没有活核心时才彻底清理；正常热重载（有活核心）走非彻底路径，绝不误杀。
+  await cleanupSocketFile(!hasCoreProcess(), child?.pid)
 
   // 设置 DNS
   if (tun?.enable && autoSetDNS) {
@@ -687,6 +713,7 @@ function setupCoreListeners(
     if (startupTimer) clearTimeout(startupTimer)
     if (child === proc) {
       child = null
+      setProtectedCorePid(undefined)
       proc.kill('SIGTERM')
       stopCoreProcessWatchdog(proc.pid)
     }
@@ -737,6 +764,7 @@ function setupCoreListeners(
 
     if (child === proc) {
       child = null
+      setProtectedCorePid(undefined)
     }
 
     if (coreOperationPhase === 'shutting-down') {
@@ -819,7 +847,7 @@ function setupCoreListeners(
       if (process.platform === 'win32') {
         managerLogger.info('Attempting Windows pipe cleanup and retry...')
         try {
-          await cleanupWindowsNamedPipes(true)
+          await cleanupWindowsNamedPipes(true, child?.pid)
           await new Promise((r) => setTimeout(r, 2000))
         } catch (cleanupError) {
           managerLogger.error('Pipe cleanup failed:', cleanupError)
@@ -893,9 +921,14 @@ async function startCoreInternal(detached = false, skipStop = false): Promise<Co
   const config = await prepareCore(detached, skipStop)
   ensureNotShuttingDown()
   const hookWaiter = config.startupHook ? createCoreHookWaiter(config.startupHook) : undefined
+
+  // prepareCore 里已做过 cleanupSocketFile；这里不再重复全量清理。
+  // 旧实现在 spawn 前再跑一次慢速枚举，常与上一轮清理重叠，把刚拉起的核心误杀，
+  // 造成反复重启、连接很久才出现。监听冲突时仍由错误分支 thorough 清理兜底。
   const proc = spawnCoreProcess(config)
   hookWaiter?.attachProcess(proc)
   child = proc
+  setProtectedCorePid(proc.pid)
   startCoreProcessWatchdog(proc, detached)
 
   if (detached) {
@@ -989,6 +1022,8 @@ function stopCoreProcessAndStreams(
     cancelActiveStartup = null
   }
   const stoppedChild = child
+  // 先撤销保护，允许随后的 cleanup 清掉正要替换的旧核心。
+  setProtectedCorePid(undefined)
   if (child) {
     child.removeAllListeners()
     try {
