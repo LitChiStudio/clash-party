@@ -18,9 +18,11 @@ import { IoAdd } from 'react-icons/io5'
 import { useTranslation } from 'react-i18next'
 import { useActiveProfile } from '@renderer/hooks/use-active-profile'
 import { getLocalRulesEditor } from '@renderer/utils/ipc'
+import { normalizeConnectionDomain } from '../../../../shared/connection-domain'
 import SettingItem from '../base/base-setting-item'
 import type { LocalRuleEditor } from '../../../../shared/local-config'
 import RuleEditorModal from '../rules/rule-editor-modal'
+import ConnectionDomainRoute from './connection-domain-route'
 
 interface Props {
   connection: IMihomoConnectionDetail
@@ -188,6 +190,8 @@ const CopyableSettingItem: React.FC<{
 const ConnectionDetailModal: React.FC<Props> = (props) => {
   const { connection, onClose } = props
   const { t } = useTranslation()
+  const host = normalizeConnectionDomain(connection.metadata.host || '')
+  const sniffHost = normalizeConnectionDomain(connection.metadata.sniffHost || '')
 
   return (
     <Modal
@@ -237,12 +241,16 @@ const ConnectionDetailModal: React.FC<Props> = (props) => {
               prefix={['DOMAIN', 'DOMAIN-SUFFIX']}
             />
           )}
+          {host && <ConnectionDomainRoute key={host} domain={host} />}
           {connection.metadata.sniffHost && (
             <CopyableSettingItem
               title={t('connections.detail.sniffHost')}
               value={connection.metadata.sniffHost}
               prefix={['DOMAIN', 'DOMAIN-SUFFIX']}
             />
+          )}
+          {sniffHost && sniffHost !== host && (
+            <ConnectionDomainRoute key={sniffHost} domain={sniffHost} />
           )}
           {connection.metadata.process && (
             <CopyableSettingItem

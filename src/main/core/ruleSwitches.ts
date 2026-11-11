@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { ruleSwitchesPath } from '../utils/dirs'
-import { mihomoRules, mihomoRulesDisable } from './mihomoApi'
 import { logger } from '../utils/logger'
 import { ruleIdentity } from '../../shared/rule-identity'
 import { getAppConfig } from '../config'
+import { mihomoRules, mihomoRulesDisable } from './mihomoApi'
+import { getConnectionDomainTargets } from './ruleTargets'
 
 interface ProfileRuleState {
   // 规则身份 -> 是否禁用（仅记录用户显式切换过的规则）
@@ -38,10 +39,10 @@ function save(store: Store): void {
   writeFileSync(p, JSON.stringify(store), 'utf8')
 }
 
-async function currentProfileId(): Promise<string> {
+async function currentProfileId(): Promise<string | undefined> {
   const { getProfileConfig } = await import('../config/profile')
   const { current } = await getProfileConfig()
-  return current || 'local'
+  return current
 }
 
 // 记录一次用户手动切换（按规则身份，不依赖 index）
@@ -68,7 +69,7 @@ export async function mihomoRuleSetDisabled(
     `[ruleSwitches] setDisabled identity=${identity.slice(0, 48)} index=${index} disabled=${disabled}`
   )
   await mihomoRulesDisable({ [index]: disabled })
-  const pid = await currentProfileId()
+  const pid = (await currentProfileId()) || 'local'
   try {
     await recordRuleToggle(pid, identity, disabled)
     logger.info(`[ruleSwitches] recorded toggle pid=${pid} disabled=${disabled}`)
@@ -80,7 +81,8 @@ export async function mihomoRuleSetDisabled(
 // 每次配置重载（订阅更新 / 手动热重载 / 内核启动）后调用：
 // 按身份还原用户关掉的开关，且订阅新增的规则默认关闭。
 export async function applyRuleSwitches(profileId?: string): Promise<void> {
-  const pid = profileId ?? (await currentProfileId())
+  const current = profileId ?? (await currentProfileId())
+  const pid = current || 'local'
   let info
   try {
     info = await mihomoRules()
@@ -119,12 +121,20 @@ export async function applyRuleSwitches(profileId?: string): Promise<void> {
 
   const patch: Record<string, boolean> = {}
   const newLastSeen: string[] = []
+  const domainTargets = new Map(Object.entries(getConnectionDomainTargets(current)))
   for (let i = 0; i < info.rules.length; i++) {
+    const rule = info.rules[i]
     const id = identities[i]
     newLastSeen.push(id)
+    // 连接详情显式保存的前置规则始终生效，订阅中同名规则仍遵循原有开关状态。
+    if (rule.type === 'Domain' && domainTargets.get(rule.payload) === rule.proxy) {
+      domainTargets.delete(rule.payload)
+      if (rule.extra?.disabled) patch[String(rule.index)] = false
+      continue
+    }
     // 用户显式切换过的规则用其记录值；未切换过的：见过(known)=开，新增(new)=按设置（默认关）
     const desired = state.states[id] ?? (state.lastSeen.includes(id) ? false : newRuleDefaultOff)
-    if (desired) patch[String(info.rules[i].index)] = true
+    if (desired) patch[String(rule.index)] = true
   }
   state.lastSeen = newLastSeen
   save(store)

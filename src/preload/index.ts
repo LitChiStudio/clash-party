@@ -11,6 +11,8 @@ const validInvokeChannels = [
   'mihomoRuleSetDisabled',
   'mihomoRuleSetTarget',
   'mihomoRuleGetTarget',
+  'getConnectionDomainRoute',
+  'setConnectionDomainRoute',
   'mihomoProxies',
   'mihomoGroups',
   'mihomoProxyProviders',

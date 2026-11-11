@@ -191,7 +191,7 @@ export async function generateProfile(
     overrideIds.smart,
     ageSecretKey
   )
-  // 注入用户自定义的规则出站目标（直接替换对应规则的目标，不新增重复条目）
+  // 代理组覆写完成后，前置注入用户指定的域名和规则出站目标。
   const currentProfile = await applyRuleTargets(currentProfile0, profileId ?? undefined)
 
   // 根据开关状态过滤控制配置

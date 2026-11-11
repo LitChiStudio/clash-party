@@ -1,4 +1,5 @@
 import { TitleBarOverlayOptions } from 'electron'
+import type { ConnectionDomainRoute } from '../../../shared/connection-domain'
 import type {
   TrafficUsageAggregate,
   TrafficUsageBreakdownQuery,
@@ -30,6 +31,8 @@ interface IpcApi {
   mihomoRuleSetDisabled: (identity: string, index: number, disabled: boolean) => Promise<void>
   mihomoRuleSetTarget: (type: string, payload: string, target: string) => Promise<void>
   mihomoRuleGetTarget: (type: string, payload: string) => Promise<string | undefined>
+  getConnectionDomainRoute: (domain: string) => Promise<ConnectionDomainRoute>
+  setConnectionDomainRoute: (profileId: string, domain: string, group?: string) => Promise<void>
   mihomoProxies: () => Promise<IMihomoProxies>
   mihomoGroups: (includeHidden?: boolean) => Promise<IMihomoMixedGroup[]>
   mihomoProxyProviders: () => Promise<IMihomoProxyProviders>
@@ -290,6 +293,8 @@ export const {
   mihomoRuleSetDisabled,
   mihomoRuleSetTarget,
   mihomoRuleGetTarget,
+  getConnectionDomainRoute,
+  setConnectionDomainRoute,
   mihomoProxies,
   mihomoGroups,
   mihomoProxyProviders,

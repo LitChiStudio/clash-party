@@ -28,7 +28,12 @@ import {
   mihomoRulesDisable
 } from '../core/mihomoApi'
 import { mihomoRuleSetDisabled } from '../core/ruleSwitches'
-import { mihomoRuleSetTarget, getRuleTarget } from '../core/ruleTargets'
+import {
+  mihomoRuleSetTarget,
+  getRuleTarget,
+  getConnectionDomainRoute,
+  setConnectionDomainRoute
+} from '../core/ruleTargets'
 import { checkAutoRun, disableAutoRun, enableAutoRun } from '../sys/autoRun'
 import {
   getAppConfig,
@@ -271,6 +276,8 @@ const asyncHandlers: Record<string, AsyncFn> = {
   mihomoRuleSetDisabled,
   mihomoRuleSetTarget,
   getRuleTarget,
+  getConnectionDomainRoute,
+  setConnectionDomainRoute,
   queryTrafficUsageOverview,
   queryTrafficUsageBreakdown,
   importTrafficUsage,

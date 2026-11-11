@@ -1,7 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync } from 'fs'
 import path from 'path'
 import { ruleTargetsPath } from '../utils/dirs'
 import { logger } from '../utils/logger'
+import { atomicWriteFileSync, WriteQueue } from '../utils/safeFile'
+import {
+  normalizeConnectionDomain,
+  type ConnectionDomainRoute
+} from '../../shared/connection-domain'
 
 // 固定代理组名：与 override 中 proxy-groups+ 追加的分组名保持一致。
 // 渲染层用它把该分组置顶；修改分组名时需同步此处。
@@ -12,12 +17,14 @@ export const FIXED_GROUP_NAME = '本机固定组'
 interface ProfileRuleTargets {
   // (type + SEP + payload) -> 目标代理名（分组名 / DIRECT / REJECT 等）
   targets: Record<string, string>
+  domains?: Record<string, string>
 }
 type Store = Record<string, ProfileRuleTargets>
 
 const SEP = ''
 
 let cache: Store | null = null
+const targetWrites = new WriteQueue()
 
 function load(): Store {
   if (cache) return cache
@@ -35,20 +42,20 @@ function load(): Store {
 }
 
 function save(store: Store): void {
-  cache = store
   const p = ruleTargetsPath()
   mkdirSync(path.dirname(p), { recursive: true })
-  writeFileSync(p, JSON.stringify(store), 'utf8')
+  atomicWriteFileSync(p, JSON.stringify(store))
+  cache = store
 }
 
 function keyOf(type: string, payload: string | undefined): string {
   return `${type}${SEP}${payload ?? ''}`
 }
 
-async function currentProfileId(): Promise<string> {
+async function currentProfileId(): Promise<string | undefined> {
   const { getProfileConfig } = await import('../config/profile')
   const { current } = await getProfileConfig()
-  return current || 'local'
+  return current
 }
 
 // mihomo REST API 返回的规则类型是「展示型」（如 RuleSet / DomainSuffix），
@@ -89,16 +96,18 @@ export async function applyRuleTargets(
   profileId?: string
 ): Promise<IMihomoConfig> {
   const pid = profileId || 'default'
-  const store = load()
-  const pidStore = store[pid]
-  if (!pidStore || !pidStore.targets || Object.keys(pidStore.targets).length === 0) {
-    return profile
-  }
-  const targets = pidStore.targets
-  const rules = (profile as unknown as Record<string, unknown>).rules
-  if (!Array.isArray(rules)) return profile
+  const pidStore = load()[pid]
+  if (!pidStore) return profile
 
-  const ruleStrs = rules as string[]
+  const rules = profile.rules
+  const ruleStrs: string[] = Array.isArray(rules) ? rules : []
+  const targets = Array.isArray(rules) ? (pidStore.targets ?? {}) : {}
+  const domains = Object.entries(pidStore.domains ?? {})
+  const proxyGroups = profile['proxy-groups'] as { name: string }[] | undefined
+  const groups = new Set(Array.isArray(proxyGroups) ? proxyGroups.map(({ name }) => name) : [])
+  const domainRules = domains
+    .filter(([, group]) => groups.has(group))
+    .map(([domain, group]) => `DOMAIN,${domain},${group}`)
 
   const injected = Object.entries(targets).map(([key, target]) => {
     const idx = key.indexOf(SEP)
@@ -127,8 +136,15 @@ export async function applyRuleTargets(
     return `${canonicalRuleType(apiType)},${payload},${target}`
   })
 
-  ;(profile as unknown as Record<string, unknown>).rules = injected.concat(ruleStrs)
-  logger.info(`[ruleTargets] 前置注入 ${injected.length} 条自定义出站规则 (pid=${pid})`)
+  const count = domainRules.length + injected.length
+  if (count > 0) {
+    ;(profile as unknown as Record<string, unknown>).rules = [
+      ...domainRules,
+      ...injected,
+      ...ruleStrs
+    ]
+    logger.info(`[ruleTargets] 前置注入 ${count} 条自定义出站规则 (pid=${pid})`)
+  }
   return profile
 }
 
@@ -138,25 +154,27 @@ export async function mihomoRuleSetTarget(
   payload: string | undefined,
   target: string
 ): Promise<void> {
-  const pid = await currentProfileId()
-  const store = load()
-  const pidStore = store[pid] ?? { targets: {} }
-  const key = keyOf(type, payload)
-  if (!target || target === '__DEFAULT__') {
-    delete pidStore.targets[key]
-    logger.info(`[ruleTargets] 清除自定义目标 type=${type} payload=${payload ?? ''} pid=${pid}`)
-  } else {
-    pidStore.targets[key] = target
-    logger.info(
-      `[ruleTargets] 设置自定义目标 type=${type} payload=${payload ?? ''} -> ${target} pid=${pid}`
-    )
-  }
-  store[pid] = pidStore
-  save(store)
+  const pid = (await currentProfileId()) || 'local'
+  await targetWrites.run(async () => {
+    const store = load()
+    const pidStore = store[pid]
+    const targets = { ...pidStore?.targets }
+    const key = keyOf(type, payload)
+    if (!target || target === '__DEFAULT__') {
+      delete targets[key]
+      logger.info(`[ruleTargets] 清除自定义目标 type=${type} payload=${payload ?? ''} pid=${pid}`)
+    } else {
+      targets[key] = target
+      logger.info(
+        `[ruleTargets] 设置自定义目标 type=${type} payload=${payload ?? ''} -> ${target} pid=${pid}`
+      )
+    }
+    save({ ...store, [pid]: { ...pidStore, targets } })
 
-  // 配置生成层注入，必须重生配置才能让内核加载（mihomo 运行时无改规则目标 API）。
-  const { mihomoHotReloadConfig } = await import('./mihomoApi')
-  await mihomoHotReloadConfig()
+    // 配置生成层注入，必须重生配置才能让内核加载（mihomo 运行时无改规则目标 API）。
+    const { mihomoHotReloadConfig } = await import('./mihomoApi')
+    await mihomoHotReloadConfig()
+  })
 }
 
 // 渲染层下拉框读取已存盘的目标：作为下拉显示的唯一真相源，避免依赖父组件重渲染。
@@ -164,9 +182,72 @@ export async function getRuleTarget(
   type: string,
   payload: string | undefined
 ): Promise<string | undefined> {
-  const pid = await currentProfileId()
+  const pid = (await currentProfileId()) || 'local'
   const store = load()
   const pidStore = store[pid]
   if (!pidStore || !pidStore.targets) return undefined
   return pidStore.targets[keyOf(type, payload)]
+}
+
+export function getConnectionDomainTargets(profileId?: string): Readonly<Record<string, string>> {
+  return load()[profileId || 'default']?.domains ?? {}
+}
+
+async function connectionRouteGroups(): Promise<string[]> {
+  const { mihomoProxies } = await import('./mihomoApi')
+  const { proxies } = await mihomoProxies()
+  return Object.values(proxies)
+    .filter(
+      (proxy) =>
+        'all' in proxy &&
+        proxy.name !== 'GLOBAL' &&
+        proxy.name === proxy.name.trim() &&
+        !/[,\r\n]/.test(proxy.name)
+    )
+    .map(({ name }) => name)
+}
+
+export async function getConnectionDomainRoute(host: string): Promise<ConnectionDomainRoute> {
+  const domain = normalizeConnectionDomain(host)
+  if (!domain) throw new Error('Invalid connection domain')
+  const profileId = (await currentProfileId()) || 'default'
+  const groups = await connectionRouteGroups()
+  const domains = getConnectionDomainTargets(profileId)
+  return { profileId, groups, target: Object.hasOwn(domains, domain) ? domains[domain] : undefined }
+}
+
+export async function setConnectionDomainRoute(
+  profileId: string,
+  host: string,
+  target: string | undefined
+): Promise<void> {
+  const domain = normalizeConnectionDomain(host)
+  if (!domain) throw new Error('Invalid connection domain')
+
+  await targetWrites.run(async () => {
+    const { mihomoHotReloadConfig } = await import('./mihomoApi')
+    if (target !== undefined && !(await connectionRouteGroups()).includes(target)) {
+      throw new Error('Proxy group is unavailable')
+    }
+    if (((await currentProfileId()) || 'default') !== profileId) {
+      throw new Error('The active profile has changed')
+    }
+
+    const store = load()
+    const pidStore = store[profileId] ?? { targets: {} }
+    const domains = { ...pidStore.domains }
+    if (target === undefined) delete domains[domain]
+    else domains[domain] = target
+
+    save({ ...store, [profileId]: { ...pidStore, domains } })
+    try {
+      await mihomoHotReloadConfig()
+    } catch (error) {
+      save(store)
+      await mihomoHotReloadConfig().catch((rollbackError) =>
+        logger.warn('[ruleTargets] 恢复域名规则失败', rollbackError)
+      )
+      throw error
+    }
+  })
 }
