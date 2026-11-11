@@ -404,6 +404,10 @@ export const buildContextMenu = async (): Promise<Menu> => {
   return Menu.buildFromTemplate(contextMenu)
 }
 
+function createWinTrayNativeImage(iconPath: string): Electron.NativeImage {
+  return nativeImage.createFromBuffer(readFileSync(iconPath))
+}
+
 export async function createTray(): Promise<void> {
   const { useDockIcon = true, swapTrayClick = false } = await getAppConfig()
   if (process.platform === 'linux') {
@@ -417,7 +421,7 @@ export async function createTray(): Promise<void> {
     tray = new Tray(icon)
   }
   if (process.platform === 'win32') {
-    tray = new Tray(icoIcon)
+    tray = new Tray(createWinTrayNativeImage(icoIcon))
   }
   await updateTrayToolTip()
   tray?.setIgnoreDoubleClickEvents(true)
@@ -622,7 +626,11 @@ export async function getTrayTrafficStyle(): Promise<ITrayTrafficStyle> {
   const { disableTrayIconColor = false, trayTrafficTextColor = 'auto' } = await getAppConfig()
   const status = await getTrayIconStatus()
   const colored = !disableTrayIconColor && status !== 'white'
-  const source = nativeImage.createFromPath(colored ? getIconPaths()[status] : templateIcon)
+  const iconPath = colored ? getIconPaths()[status] : templateIcon
+  const source =
+    process.platform === 'win32' && iconPath.toLowerCase().endsWith('.ico')
+      ? createWinTrayNativeImage(iconPath)
+      : nativeImage.createFromPath(iconPath)
   // 只缩不放：状态图标是 512px，直接丢给渲染进程既浪费又要一次性缩到 36px；模板图标本身只有 64px
   const icon =
     source.getSize().height > customTrayIconSize * 8
@@ -729,6 +737,12 @@ function createCustomTrayImage(customTrayIcon: string): TrayImage | null {
   if (icon.isEmpty()) return null
 
   if (process.platform === 'win32' && iconExt === '.ico') {
+    try {
+      const img = createWinTrayNativeImage(customTrayIcon)
+      if (!img.isEmpty()) return img
+    } catch {
+      // ignore
+    }
     return customTrayIcon
   }
   if (process.platform === 'linux') {
@@ -819,7 +833,7 @@ function setTrayImage(iconPath: string): void {
     const icon = nativeImage.createFromPath(iconPath).resize({ height: 16 })
     tray.setImage(icon)
   } else if (process.platform === 'win32') {
-    tray.setImage(iconPath)
+    tray.setImage(createWinTrayNativeImage(iconPath))
   } else if (process.platform === 'linux') {
     tray.setImage(iconPath)
   }

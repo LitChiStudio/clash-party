@@ -102,13 +102,10 @@ export function exePath(): string {
 export function resourcesDir(): string {
   if (is.dev) {
     return path.join(__dirname, '../../extra')
-  } else {
-    if (app.getAppPath().endsWith('asar')) {
-      return process.resourcesPath
-    } else {
-      return path.join(app.getAppPath(), 'resources')
-    }
   }
+  // extraResources（sidecar / files）始终随进程 resources 目录分发，
+  // 无论应用打包为 app.asar 还是展开的 app/ 目录，根目录都是 process.resourcesPath。
+  return process.resourcesPath
 }
 
 export function resourcesFilesDir(): string {

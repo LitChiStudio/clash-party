@@ -1,4 +1,5 @@
 appId: party.mihomo.app
+asar: false
 productName: Clash Party
 directories:
   buildResources: build
