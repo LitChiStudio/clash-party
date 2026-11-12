@@ -40,7 +40,10 @@ vi.mock('../resolve/server', () => ({
   subStoreFrontendPort: () => 0
 }))
 
-vi.mock('../sys/sysproxy', () => ({ triggerSysProxy: vi.fn() }))
+vi.mock('../sys/sysproxy', () => ({
+  startWindowsSystemProxyMonitor: vi.fn(),
+  triggerSysProxy: vi.fn()
+}))
 vi.mock('../sys/ssid', () => ({ startSSIDCheck: vi.fn() }))
 vi.mock('../sys/resume', () => ({ initResumeRecovery: vi.fn() }))
 

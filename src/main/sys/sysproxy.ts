@@ -3,8 +3,9 @@ import { exec, execFile } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import { triggerAutoProxy, triggerManualProxy } from 'sysproxy-rs'
-import { net } from 'electron'
+import { app, dialog, net } from 'electron'
 import axios from 'axios'
+import { t } from 'i18next'
 import { getAppConfig, getControledMihomoConfig } from '../config'
 import { DEFAULT_MIHOMO_PORTS } from '../../shared/appConfig'
 import { pacPort, startPacServer, stopPacServer } from '../resolve/server'
@@ -14,6 +15,10 @@ import { resourcesFilesDir } from '../utils/dirs'
 let triggerSysProxyTimer: NodeJS.Timeout | null = null
 let triggerSysProxyQueue: Promise<void> = Promise.resolve()
 let triggerSysProxySequence = 0
+let pendingProxyOperations = 0
+let windowsProxyMonitor: NodeJS.Timeout | undefined
+let checkingWindowsProxy = false
+let reportedWindowsProxyMismatch: string | undefined
 const helperSocketPath = '/tmp/mihomo-party-helper.sock'
 const helperPath = '/Library/PrivilegedHelperTools/party.mihomo.helper'
 const helperPlistPath = '/Library/LaunchDaemons/party.mihomo.helper.plist'
@@ -74,6 +79,173 @@ function helperAxiosOptions(helperTimeout?: number): { socketPath: string; timeo
     : { socketPath: helperSocketPath, timeout: helperTimeout }
 }
 
+interface ProxySettings {
+  enabled: boolean
+  mode: ISysProxyConfig['mode']
+  host: string
+  port: number
+  bypass: string
+  pacUrl: string
+}
+
+async function getProxySettings(): Promise<ProxySettings> {
+  const { sysProxy } = await getAppConfig()
+  const { 'mixed-port': port = DEFAULT_MIHOMO_PORTS.mixed } = await getControledMihomoConfig()
+  const host = sysProxy.host || '127.0.0.1'
+  return {
+    enabled: sysProxy.enable,
+    mode: sysProxy.mode,
+    host,
+    port,
+    bypass: (sysProxy.bypass ?? defaultBypass)
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .join(process.platform === 'win32' ? ';' : ','),
+    pacUrl: `http://${host}:${pacPort}/pac`
+  }
+}
+
+async function readWindowsProxy(): Promise<{
+  manualEnabled: boolean
+  manualSelected: boolean
+  server: string
+  bypass: string
+  pac: string
+  pacSelected: boolean
+  autoDetect: boolean
+}> {
+  const key = 'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'
+  const reg = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'reg.exe')
+  const { stdout } = await promisify(execFile)(reg, ['query', key, '/s'], {
+    windowsHide: true,
+    timeout: 3000
+  })
+  const sections = stdout.trimStart().split(/\r?\n(?=HKEY_)/i)
+  const section = (name: string): string =>
+    sections.find((entry) => entry.split(/\r?\n/, 1)[0].toLowerCase() === name.toLowerCase()) ?? ''
+  const settings = section(key)
+  if (!settings) throw new Error('Windows Internet Settings registry key was not returned')
+  const connections = section(`${key}\\Connections`)
+  const value = (rows: string, name: string): string =>
+    rows.match(new RegExp(`^[ \\t]+${name}[ \\t]+REG_\\w+[ \\t]*([^\\r\\n]*)`, 'mi'))?.[1].trim() ??
+    ''
+  // WinINet stores its LAN connection flags after two DWORDs in DefaultConnectionSettings.
+  const saved = Buffer.from(value(connections, 'DefaultConnectionSettings'), 'hex')
+  const flags = saved.length >= 12 ? saved.readUInt32LE(8) : undefined
+  const manualEnabled = Number(value(settings, 'ProxyEnable')) === 1
+  const pac = value(settings, 'AutoConfigURL')
+  return {
+    manualEnabled,
+    manualSelected: flags === undefined ? manualEnabled : Boolean(flags & 0x02),
+    server: value(settings, 'ProxyServer'),
+    bypass: value(settings, 'ProxyOverride'),
+    pac,
+    pacSelected: flags === undefined ? Boolean(pac) : Boolean(flags & 0x04),
+    autoDetect: flags !== undefined && Boolean(flags & 0x08)
+  }
+}
+
+function windowsProxyMatches(
+  actual: Awaited<ReturnType<typeof readWindowsProxy>>,
+  expected?: ProxySettings
+): boolean {
+  const manual = actual.manualEnabled || actual.manualSelected
+  if (!expected) return !manual && !actual.pacSelected && !actual.autoDetect
+  if (expected.mode === 'auto') {
+    return !manual && actual.pacSelected && actual.pac === expected.pacUrl
+  }
+
+  const normalizeBypass = (bypass: string): string =>
+    [
+      ...new Set(
+        bypass
+          .toLowerCase()
+          .split(';')
+          .map((entry) => entry.trim())
+          .filter(Boolean)
+      )
+    ]
+      .sort()
+      .join(';')
+  return (
+    actual.manualEnabled &&
+    actual.manualSelected &&
+    !actual.pacSelected &&
+    !actual.autoDetect &&
+    actual.server.toLowerCase() === `${expected.host}:${expected.port}`.toLowerCase() &&
+    normalizeBypass(actual.bypass) === normalizeBypass(expected.bypass)
+  )
+}
+
+export function startWindowsSystemProxyMonitor(): void {
+  if (process.platform !== 'win32' || windowsProxyMonitor) return
+
+  const check = (): void => {
+    void checkWindowsSystemProxy()
+  }
+  windowsProxyMonitor = setInterval(check, 5000)
+  windowsProxyMonitor.unref()
+  app.on('browser-window-focus', check)
+  app.once('before-quit', () => {
+    clearInterval(windowsProxyMonitor)
+    windowsProxyMonitor = undefined
+    app.off('browser-window-focus', check)
+  })
+  check()
+}
+
+async function checkWindowsSystemProxy(): Promise<void> {
+  if (!windowsProxyMonitor || checkingWindowsProxy || pendingProxyOperations > 0) return
+  checkingWindowsProxy = true
+  const sequence = triggerSysProxySequence
+  try {
+    const expected = await getProxySettings()
+    if (!windowsProxyMonitor || sequence !== triggerSysProxySequence) return
+    if (!expected.enabled) {
+      reportedWindowsProxyMismatch = undefined
+      return
+    }
+
+    const actual = await readWindowsProxy()
+    if (!windowsProxyMonitor || sequence !== triggerSysProxySequence) return
+    if (windowsProxyMatches(actual, expected)) {
+      reportedWindowsProxyMismatch = undefined
+      return
+    }
+
+    const mismatch = JSON.stringify([expected, actual])
+    if (reportedWindowsProxyMismatch === mismatch) return
+    reportedWindowsProxyMismatch = mismatch
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: t('sysproxy.title'),
+      message: t('sysproxy.changed.message'),
+      buttons: [t('sysproxy.changed.restore'), t('sysproxy.changed.later')],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true
+    })
+
+    if (response !== 0 || !(await getAppConfig()).sysProxy.enable) return
+    if (!windowsProxyMonitor || sequence !== triggerSysProxySequence) return
+    try {
+      await triggerSysProxy(true)
+    } catch (error) {
+      await proxyLogger.error('Failed to restore Windows system proxy', error)
+      if (windowsProxyMonitor) {
+        await dialog.showMessageBox({
+          type: 'error',
+          message: t('common.error.sysproxySetupFailed')
+        })
+      }
+    }
+  } catch (error) {
+    await proxyLogger.warn('Failed to check Windows system proxy', error)
+  } finally {
+    checkingWindowsProxy = false
+  }
+}
+
 export async function triggerSysProxy(
   enable: boolean,
   options: TriggerSysProxyOptions = {}
@@ -85,57 +257,56 @@ export async function triggerSysProxy(
     triggerSysProxyTimer = null
   }
 
-  const operation = triggerSysProxyQueue.then(async () => {
-    if (net.isOnline() || options.force) {
-      if (enable) {
+  pendingProxyOperations++
+  const operation = triggerSysProxyQueue
+    .then(async () => {
+      if (process.platform === 'win32' || net.isOnline() || options.force) {
         await disableSysProxy(options.helperTimeout)
-        await enableSysProxy(options.helperTimeout)
-      } else {
-        await disableSysProxy(options.helperTimeout)
+        const expected = enable ? await enableSysProxy(options.helperTimeout) : undefined
+        if (process.platform === 'win32') {
+          if (!windowsProxyMatches(await readWindowsProxy(), expected)) {
+            throw new Error(
+              t(enable ? 'common.error.sysproxySetupFailed' : 'sysproxy.disableFailed')
+            )
+          }
+          reportedWindowsProxyMismatch = undefined
+        }
+        return
       }
-      return
-    }
 
-    if (sequence !== triggerSysProxySequence) return
-    triggerSysProxyTimer = setTimeout(() => {
-      triggerSysProxyTimer = null
       if (sequence !== triggerSysProxySequence) return
-      void triggerSysProxy(enable, options).catch((error) => {
-        void proxyLogger.error('Failed to retry system proxy', error)
-      })
-    }, 5000)
-  })
+      triggerSysProxyTimer = setTimeout(() => {
+        triggerSysProxyTimer = null
+        if (sequence !== triggerSysProxySequence) return
+        void triggerSysProxy(enable, options).catch((error) => {
+          void proxyLogger.error('Failed to retry system proxy', error)
+        })
+      }, 5000)
+    })
+    .finally(() => {
+      pendingProxyOperations--
+    })
 
   triggerSysProxyQueue = operation.catch(() => {})
   return operation
 }
 
-async function enableSysProxy(helperTimeout?: number): Promise<void> {
+async function enableSysProxy(helperTimeout?: number): Promise<ProxySettings> {
   await startPacServer()
-  const { sysProxy } = await getAppConfig()
-  const { mode, host, bypass = defaultBypass } = sysProxy
-  const { 'mixed-port': port = DEFAULT_MIHOMO_PORTS.mixed } = await getControledMihomoConfig()
-  const proxyHost = host || '127.0.0.1'
-  const formattedBypass = bypass
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .join(process.platform === 'win32' ? ';' : ',')
+  const settings = await getProxySettings()
+  const { mode, host, port, bypass, pacUrl } = settings
 
   if (process.platform === 'darwin') {
     // macOS 需要 helper 提权
     if (mode === 'auto') {
       await helperRequest(() =>
-        axios.post(
-          'http://localhost/pac',
-          { url: `http://${proxyHost}:${pacPort}/pac` },
-          helperAxiosOptions(helperTimeout)
-        )
+        axios.post('http://localhost/pac', { url: pacUrl }, helperAxiosOptions(helperTimeout))
       )
     } else {
       await helperRequest(() =>
         axios.post(
           'http://localhost/global',
-          { host: proxyHost, port: port.toString(), bypass: formattedBypass },
+          { host, port: port.toString(), bypass },
           helperAxiosOptions(helperTimeout)
         )
       )
@@ -144,15 +315,16 @@ async function enableSysProxy(helperTimeout?: number): Promise<void> {
     // Windows / Linux 直接使用 sysproxy-rs
     try {
       if (mode === 'auto') {
-        triggerAutoProxy(true, `http://${proxyHost}:${pacPort}/pac`)
+        triggerAutoProxy(true, pacUrl)
       } else {
-        triggerManualProxy(true, proxyHost, port, formattedBypass)
+        triggerManualProxy(true, host, port, bypass)
       }
     } catch (error) {
       await proxyLogger.error('Failed to enable system proxy', error)
       throw error
     }
   }
+  return settings
 }
 
 async function disableSysProxy(helperTimeout?: number): Promise<void> {

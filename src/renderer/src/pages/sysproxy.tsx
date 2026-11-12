@@ -109,8 +109,6 @@ const Sysproxy: React.FC = () => {
   const onSave = async (): Promise<void> => {
     setChanged(false)
 
-    // 保存当前的开关状态，以便在失败时恢复
-    const previousState = values.enable
     const sysProxyPatch: ISysProxyConfig = { ...values }
     if (hasInvalidBypass) {
       // 存在非法条目时不覆盖已保存的绕过列表，其它系统代理设置照常保存
@@ -121,15 +119,10 @@ const Sysproxy: React.FC = () => {
 
     try {
       await patchAppConfig({ sysProxy: sysProxyPatch })
-      await triggerSysProxy(true)
-
-      await patchAppConfig({ sysProxy: { enable: true } })
+      await triggerSysProxy(values.enable)
     } catch (e) {
-      setValues({ ...values, enable: previousState })
       setChanged(true)
       showErrorSync(e, t('common.error.sysproxySetupFailed'))
-
-      await patchAppConfig({ sysProxy: { enable: false } })
     }
   }
 

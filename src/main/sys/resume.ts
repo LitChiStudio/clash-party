@@ -76,7 +76,7 @@ export async function recoverAfterResume(): Promise<void> {
     }
 
     const { sysProxy } = await getAppConfig()
-    if (sysProxy?.enable) {
+    if (sysProxy?.enable && process.platform !== 'win32') {
       // 幂等；网络还没回来时 triggerSysProxy 自己会排队重试
       await triggerSysProxy(true)
     }

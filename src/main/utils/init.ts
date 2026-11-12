@@ -5,13 +5,12 @@ import { promisify } from 'util'
 import path from 'path'
 import { app, dialog } from 'electron'
 import {
-  startPacServer,
   startSubStoreBackendServer,
   startSubStoreFrontendServer,
   subStorePort,
   subStoreFrontendPort
 } from '../resolve/server'
-import { triggerSysProxy } from '../sys/sysproxy'
+import { startWindowsSystemProxyMonitor, triggerSysProxy } from '../sys/sysproxy'
 import {
   getAppConfig,
   getControledMihomoConfig,
@@ -529,9 +528,6 @@ export async function init(): Promise<void> {
   initTasks.push(
     (async (): Promise<void> => {
       try {
-        if (sysProxy.enable) {
-          await startPacServer()
-        }
         await triggerSysProxy(sysProxy.enable)
       } catch {
         // ignore
@@ -540,6 +536,7 @@ export async function init(): Promise<void> {
   )
 
   await Promise.all(initTasks)
+  startWindowsSystemProxyMonitor()
   initDeeplink()
 }
 
