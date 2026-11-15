@@ -29,6 +29,17 @@ function mockFilteredTasklist(): void {
   mocks.execFile.mockImplementation(
     (file: string, args: string[] = [], _options: unknown, callback) => {
       if (!isTasklist(file)) {
+        if (file === 'powershell') {
+          callback(null, {
+            stdout: JSON.stringify([
+              { Id: 1002, Path: 'C:\\Program Files\\Clash Party\\resources\\sidecar\\mihomo.exe' },
+              { Id: 1003, Path: 'C:\\Program Files\\Clash Party\\resources\\sidecar\\mihomo.exe' },
+              { Id: 1004, Path: 'D:\\Games\\TalesWeaver\\mihomo-smart.exe' },
+              { Id: 1006, Path: null }
+            ])
+          })
+          return
+        }
         callback(new Error(`unexpected exec: ${file}`))
         return
       }
@@ -85,12 +96,12 @@ describe('cleanupWindowsNamedPipes', () => {
     expect(terminatedPids()).toEqual([])
   })
 
-  it('skips the live protected core pid during thorough cleanup', async () => {
+  it('skips protected, unrelated and unidentified processes during thorough cleanup', async () => {
     setProtectedCorePid(1002)
 
     await cleanupWindowsNamedPipes(true)
 
-    expect(terminatedPids().sort((a, b) => a - b)).toEqual([1003, 1004, 1006])
+    expect(terminatedPids()).toEqual([1003])
   })
 
   it('skips process inspection when no core executable is running', async () => {

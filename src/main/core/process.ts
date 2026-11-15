@@ -53,7 +53,7 @@ export async function cleanupWindowsNamedPipes(
 
   const run = async (): Promise<void> => {
     try {
-      const pids = await findWindowsCorePids(true, excludePid)
+      const pids = await findWindowsCorePids(excludePid)
       if (pids.length === 0) return
 
       managerLogger.info(`Found potential pipe-blocking core processes: ${pids.join(',')}`)
@@ -76,18 +76,12 @@ export async function cleanupWindowsNamedPipes(
   await waited
 }
 
-async function findWindowsCorePids(thorough: boolean, excludePid?: number): Promise<number[]> {
-  const timeout = thorough ? 5000 : 1500
+async function findWindowsCorePids(excludePid?: number): Promise<number[]> {
+  const timeout = 5000
   const candidates = await collectCorePids(timeout)
   const skipped = new Set(activeExcludePids(excludePid))
   const filtered = candidates.filter((pid) => !skipped.has(pid))
   if (filtered.length === 0) return []
-
-  // 常规启动只按进程名清理，避免每次都拉起 PowerShell（冷启动很慢）。
-  // 路径校验留给监听冲突时的 thorough 路径。
-  if (!thorough) {
-    return filtered
-  }
 
   let processInfo = ''
   try {
@@ -103,7 +97,7 @@ async function findWindowsCorePids(thorough: boolean, excludePid?: number): Prom
     processInfo = result.stdout.trim()
   } catch (error) {
     managerLogger.warn('Failed to inspect core process paths:', error)
-    return filtered
+    return []
   }
   if (!processInfo) return []
 
@@ -112,7 +106,7 @@ async function findWindowsCorePids(thorough: boolean, excludePid?: number): Prom
     parsed = JSON.parse(processInfo)
   } catch (error) {
     managerLogger.warn('Failed to parse core process paths:', error)
-    return filtered
+    return []
   }
 
   const corePaths = windowsCoreExecutables.map((name) =>
@@ -126,9 +120,11 @@ async function findWindowsCorePids(thorough: boolean, excludePid?: number): Prom
       Path?: unknown
     }
     if (typeof pid !== 'number' || !filtered.includes(pid) || skipNow.has(pid)) continue
-    if (typeof exePath !== 'string' || !exePath) {
-      pids.push(pid)
-    } else if (corePaths.includes(path.win32.resolve(exePath).toLowerCase())) {
+    if (
+      typeof exePath === 'string' &&
+      exePath &&
+      corePaths.includes(path.win32.resolve(exePath).toLowerCase())
+    ) {
       pids.push(pid)
     }
   }

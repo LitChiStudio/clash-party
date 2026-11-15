@@ -1,6 +1,6 @@
 import { exec, execFile } from 'child_process'
 import { promisify } from 'util'
-import { stat } from 'fs/promises'
+import { readdir, stat } from 'fs/promises'
 import { existsSync } from 'fs'
 import path from 'path'
 import { app, dialog, ipcMain } from 'electron'
@@ -11,7 +11,6 @@ import { checkAutoRun, enableAutoRun } from '../sys/autoRun'
 import i18next from '../../shared/i18n'
 import { checkAdminPrivileges } from './admin'
 
-const execPromise = promisify(exec)
 const execFilePromise = promisify(execFile)
 
 // 内核名称白名单
@@ -126,112 +125,9 @@ export async function checkHighPrivilegeCore(): Promise<boolean> {
 }
 
 async function checkHighPrivilegeMihomoProcess(): Promise<boolean> {
-  const mihomoExecutables =
-    process.platform === 'win32'
-      ? ['mihomo.exe', 'mihomo-alpha.exe', 'mihomo-smart.exe']
-      : ['mihomo', 'mihomo-alpha', 'mihomo-smart']
-
-  try {
-    if (process.platform === 'win32') {
-      let stdout = ''
-      try {
-        const result = await execFilePromise('tasklist', ['/FO', 'CSV', '/NH'], {
-          windowsHide: true,
-          timeout: 3000,
-          maxBuffer: 4 * 1024 * 1024
-        })
-        stdout = result.stdout
-      } catch (error) {
-        managerLogger.error('Failed to list processes via tasklist', error)
-        return false
-      }
-
-      const candidatePids: { pid: string; image: string }[] = []
-      for (const line of stdout.split('\n')) {
-        const match = line.match(/^"([^"]+)","(\d+)"/)
-        if (!match) continue
-        const image = match[1].toLowerCase()
-        if (mihomoExecutables.includes(image)) {
-          candidatePids.push({ pid: match[2], image })
-        }
-      }
-
-      if (candidatePids.length === 0) {
-        managerLogger.info('No mihomo processes found running')
-        return false
-      }
-
-      managerLogger.info(`Found ${candidatePids.length} mihomo processes running`)
-
-      const pidArgs = candidatePids.map(({ pid }) => pid).join(',')
-      try {
-        const { stdout: processInfo } = await execFilePromise(
-          'powershell',
-          [
-            '-NoProfile',
-            '-Command',
-            `Get-Process -Id ${pidArgs} -ErrorAction SilentlyContinue | Select-Object Name,Id,Path | ConvertTo-Json -Compress`
-          ],
-          { windowsHide: true, timeout: 4000, maxBuffer: 4 * 1024 * 1024 }
-        )
-
-        if (!processInfo.trim()) return false
-
-        const parsed = JSON.parse(processInfo)
-        const list = Array.isArray(parsed) ? parsed : [parsed]
-        for (const proc of list) {
-          if (
-            proc &&
-            typeof proc.Name === 'string' &&
-            proc.Name.toLowerCase().includes('mihomo') &&
-            proc.Path === null
-          ) {
-            return true
-          }
-        }
-      } catch (error) {
-        managerLogger.info('PowerShell process inspection failed', error)
-      }
-    } else {
-      let foundProcesses = false
-
-      for (const executable of mihomoExecutables) {
-        try {
-          const { stdout } = await execPromise(`ps aux | grep ${executable} | grep -v grep`)
-          const lines = stdout
-            .split('\n')
-            .filter((line) => line.trim() && line.includes(executable))
-
-          if (lines.length > 0) {
-            foundProcesses = true
-            managerLogger.info(`Found ${lines.length} ${executable} processes running`)
-
-            for (const line of lines) {
-              const parts = line.trim().split(/\s+/)
-              if (parts.length >= 1) {
-                const user = parts[0]
-                managerLogger.info(`${executable} process running as user: ${user}`)
-
-                if (user === 'root') {
-                  return true
-                }
-              }
-            }
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      if (!foundProcesses) {
-        managerLogger.info('No mihomo processes found running')
-      }
-    }
-  } catch (error) {
-    managerLogger.error('Failed to check high privilege mihomo process', error)
-  }
-
-  return false
+  const pipes = await readdir('\\\\.\\pipe\\')
+  // The executable name is shared by other apps. This pipe is created by Clash Party's elevated core.
+  return pipes.some((name) => /^MihomoParty\\mihomo-admin-.+-\d+(?:-[a-z0-9]+)?$/i.test(name))
 }
 
 export async function grantTunPermissions(): Promise<void> {

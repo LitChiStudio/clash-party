@@ -1,6 +1,6 @@
 import { mkdir, rm, readdir, cp, stat, rename } from 'fs/promises'
 import { existsSync } from 'fs'
-import { exec, execFile } from 'child_process'
+import { exec } from 'child_process'
 import { promisify } from 'util'
 import path from 'path'
 import { app, dialog } from 'electron'
@@ -164,49 +164,7 @@ async function initConfig(): Promise<void> {
   )
 }
 
-async function killOldMihomoProcesses(): Promise<void> {
-  if (process.platform !== 'win32') return
-
-  try {
-    const execFilePromise = promisify(execFile)
-    const coreNames = new Set(['mihomo.exe', 'mihomo-alpha.exe', 'mihomo-smart.exe'])
-    const { stdout } = await execFilePromise('tasklist', ['/FO', 'CSV', '/NH'], {
-      windowsHide: true,
-      timeout: 3000,
-      maxBuffer: 4 * 1024 * 1024
-    })
-
-    const pids = stdout
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line && !line.includes('INFO:'))
-      .map((line) => {
-        const [, imageName, pid] = line.match(/^"([^"]+)","(\d+)"/) || []
-        if (!imageName || !coreNames.has(imageName.toLowerCase())) return NaN
-        return parseInt(pid, 10)
-      })
-      .filter((pid) => !isNaN(pid) && pid !== process.pid)
-
-    if (pids.length === 0) return
-
-    for (const pid of pids) {
-      try {
-        process.kill(pid, 'SIGTERM')
-        await initLogger.info(`Terminated old mihomo process ${pid}`)
-      } catch {
-        // 进程可能退出
-      }
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 200))
-  } catch {
-    // 忽略错误
-  }
-}
-
 async function initFiles(): Promise<void> {
-  await killOldMihomoProcesses()
-
   const copyFile = async (file: string, targetDirs: string[]): Promise<void> => {
     const sourcePath = path.join(resourcesFilesDir(), file)
     if (!existsSync(sourcePath)) return
