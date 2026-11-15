@@ -156,6 +156,7 @@ export async function patchControledMihomoConfig(patch: Partial<IMihomoConfig>):
       'nameserver-policy'
     )
     deepMerge(nextConfig, nextPatch)
+    if (nextConfig['interface-name'] === undefined) delete nextConfig['interface-name']
     if (replaceNameserverPolicy) {
       nextConfig.dns = nextConfig.dns || {}
       nextConfig.dns['nameserver-policy'] = nextPatch.dns?.['nameserver-policy'] ?? {}

@@ -140,3 +140,38 @@ it('keeps an explicit domain route enabled alongside the default-off rule policy
   await applyRuleSwitches()
   expect(mocks.disableRules).toHaveBeenCalledWith({ '1': true, '2': true })
 })
+
+it('persists wildcard routes below exact routes and keeps them enabled on reload', async () => {
+  const { applyRuleTargets, getConnectionDomainRoute, setConnectionDomainRoute } =
+    await import('./ruleTargets')
+  await setConnectionDomainRoute('profile-a', ' *.Example.Test. ', 'GroupB')
+  await setConnectionDomainRoute('profile-a', 'c.example.test', 'GroupA')
+  await expect(getConnectionDomainRoute('*.example.test')).resolves.toMatchObject({
+    target: 'GroupB'
+  })
+  const profileWithRoutes = await applyRuleTargets(profile('GroupA', 'GroupB'), 'profile-a')
+  const regex = '^.+\\.example\\.test$'
+  expect(profileWithRoutes.rules).toEqual([
+    'DOMAIN,c.example.test,GroupA',
+    `DOMAIN-REGEX,${regex},GroupB`,
+    'DOMAIN-SUFFIX,example.test,GroupA',
+    'MATCH,DIRECT'
+  ])
+
+  const matches = new RegExp(regex)
+  expect(matches.test('a.b.example.test')).toBe(true)
+  expect(matches.test('example.test')).toBe(false)
+  expect(matches.test('a.notexample.test')).toBe(false)
+
+  mocks.rules.mockResolvedValue({
+    rules: [{ index: 0, type: 'DomainRegex', payload: regex, proxy: 'GroupB' }]
+  })
+  const { applyRuleSwitches } = await import('./ruleSwitches')
+  await applyRuleSwitches('profile-a')
+  expect(mocks.disableRules).not.toHaveBeenCalled()
+
+  await setConnectionDomainRoute('profile-a', '*.example.test', undefined)
+  await expect(getConnectionDomainRoute('*.example.test')).resolves.toMatchObject({
+    target: undefined
+  })
+})

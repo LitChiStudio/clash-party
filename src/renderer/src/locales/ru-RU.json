@@ -259,6 +259,8 @@
   "mihomo.skipAuthPrefixes": "Пропускать проверку для IP сегментов",
   "mihomo.useRttDelayTest": "Использовать 1-RTT тест задержки",
   "mihomo.tcpConcurrent": "TCP параллельность",
+  "mihomo.outboundInterface": "Исходящий сетевой интерфейс",
+  "mihomo.outboundInterface.profile": "По настройке профиля",
   "mihomo.storeSelectedNode": "Сохранять выбранный узел",
   "mihomo.storeFakeIp": "Сохранять Fake IP",
   "mihomo.disableLoopbackDetector": "Отключить определение петли",

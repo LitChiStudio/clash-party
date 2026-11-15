@@ -43,6 +43,7 @@ import {
   fetchMihomoTags,
   installSpecificMihomoCore,
   clearMihomoVersionCache,
+  getInterfaces,
   mihomoUpgradeUI
 } from '@renderer/utils/ipc'
 import React, { useState, useEffect } from 'react'
@@ -135,6 +136,7 @@ const Mihomo: React.FC = () => {
     'lan-disallowed-ips': lanDisallowedIps = [],
     'unified-delay': unifiedDelay,
     'tcp-concurrent': tcpConcurrent,
+    'interface-name': outboundInterface,
     'mixed-port': mixedPort = DEFAULT_MIHOMO_PORTS.mixed,
     'socks-port': socksPort = DEFAULT_MIHOMO_PORTS.socks,
     port: httpPort = DEFAULT_MIHOMO_PORTS.http,
@@ -177,6 +179,8 @@ const Mihomo: React.FC = () => {
   const [installing, setInstalling] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [outboundInterfaces, setOutboundInterfaces] = useState<string[]>([])
+  const [savingOutboundInterface, setSavingOutboundInterface] = useState(false)
 
   // 生成随机端口 (范围 1024-65535)
   const generateRandomPort = () => Math.floor(Math.random() * (65535 - 1024 + 1)) + 1024
@@ -188,6 +192,28 @@ const Mihomo: React.FC = () => {
   useEffect(() => {
     setExternalUiUrlInput(externalUiUrl)
   }, [externalUiUrl])
+
+  useEffect(() => {
+    void getInterfaces()
+      .then((interfaces) => {
+        setOutboundInterfaces(
+          Object.entries(interfaces)
+            .filter(([, addresses]) => addresses.some((address) => !address.internal))
+            .map(([name]) => name)
+            .sort((a, b) => a.localeCompare(b))
+        )
+      })
+      .catch((error) => console.error('Failed to list network interfaces:', error))
+  }, [])
+
+  const outboundItems = [
+    { key: 'profile', label: t('mihomo.outboundInterface.profile'), name: undefined },
+    ...[
+      ...new Set(
+        outboundInterface ? [outboundInterface, ...outboundInterfaces] : outboundInterfaces
+      )
+    ].map((name) => ({ key: `interface:${name}`, label: name, name }))
+  ]
 
   const onChangeNeedRestart = async (patch: Partial<IMihomoConfig>): Promise<void> => {
     await patchControledMihomoConfig(patch)
@@ -1441,6 +1467,30 @@ const Mihomo: React.FC = () => {
                 onChangeNeedRestart({ 'tcp-concurrent': v })
               }}
             />
+          </SettingItem>
+          <SettingItem title={t('mihomo.outboundInterface')} divider>
+            <Select
+              size="sm"
+              className="w-52"
+              aria-label={t('mihomo.outboundInterface')}
+              items={outboundItems}
+              disallowEmptySelection
+              isDisabled={!controledMihomoConfig || savingOutboundInterface}
+              selectedKeys={[outboundInterface ? `interface:${outboundInterface}` : 'profile']}
+              onSelectionChange={async (keys) => {
+                if (keys === 'all') return
+                const item = outboundItems.find(({ key }) => keys.has(key))
+                if (!item || item.name === outboundInterface) return
+                setSavingOutboundInterface(true)
+                try {
+                  await onChangeNeedRestart({ 'interface-name': item.name })
+                } finally {
+                  setSavingOutboundInterface(false)
+                }
+              }}
+            >
+              {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+            </Select>
           </SettingItem>
           <SettingItem title={t('mihomo.storeSelectedNode')} divider>
             <Switch

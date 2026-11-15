@@ -1,4 +1,8 @@
-import { normalizeConnectionDomain } from '../../../shared/connection-domain'
+import { getDomain } from 'tldts'
+import {
+  normalizeConnectionDomain,
+  normalizeConnectionDomainPattern
+} from '../../../shared/connection-domain'
 
 export const connectionOutboundFilters = ['all', 'proxy', 'direct', 'hidden'] as const
 export type ConnectionOutboundFilter = (typeof connectionOutboundFilters)[number]
@@ -21,7 +25,7 @@ export function readHiddenConnectionDomains(stored: string | null): Set<string> 
       return new Set(
         values
           .filter((value): value is string => typeof value === 'string')
-          .map(normalizeConnectionDomain)
+          .map(normalizeConnectionDomainPattern)
           .filter((domain) => domain !== undefined)
       )
     }
@@ -29,6 +33,28 @@ export function readHiddenConnectionDomains(stored: string | null): Set<string> 
     // Invalid local preferences fall back to an empty list.
   }
   return new Set()
+}
+
+export function getConnectionDomainPatterns(
+  metadata: Pick<IMihomoConnectionDetail['metadata'], 'host' | 'sniffHost'>
+): Set<string> {
+  const domains = getConnectionDomains(metadata)
+  const patterns = new Set(domains)
+  for (const domain of domains) {
+    const base = getDomain(domain, { allowPrivateDomains: true })
+    if (base) patterns.add(`*.${base}`)
+  }
+  return patterns
+}
+
+function matchesHiddenDomain(domain: string, patterns: ReadonlySet<string>): boolean {
+  if (patterns.has(domain)) return true
+  let dot = domain.indexOf('.')
+  while (dot !== -1) {
+    if (patterns.has(`*${domain.slice(dot)}`)) return true
+    dot = domain.indexOf('.', dot + 1)
+  }
+  return false
 }
 
 export function filterConnectionsByOutbound(
@@ -46,7 +72,9 @@ export function filterConnectionsByOutbound(
 
     const hidden =
       hiddenDomains.size > 0 &&
-      [...getConnectionDomains(connection.metadata)].some((domain) => hiddenDomains.has(domain))
+      [...getConnectionDomains(connection.metadata)].some((domain) =>
+        matchesHiddenDomain(domain, hiddenDomains)
+      )
     return outbound === 'hidden' ? hidden : !hidden
   })
 }

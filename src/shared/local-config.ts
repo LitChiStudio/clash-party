@@ -52,6 +52,7 @@ export const LOCAL_GENERAL_CONFIG_KEYS = [
   'allow-lan',
   'unified-delay',
   'tcp-concurrent',
+  'interface-name',
   'log-level',
   'find-process-mode',
   'skip-auth-prefixes',

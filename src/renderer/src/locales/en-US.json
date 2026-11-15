@@ -268,6 +268,8 @@
   "mihomo.skipAuthPrefixes": "Skip Auth IP Segments",
   "mihomo.useRttDelayTest": "Use 1-RTT Delay Test",
   "mihomo.tcpConcurrent": "TCP Concurrent",
+  "mihomo.outboundInterface": "Outbound Interface",
+  "mihomo.outboundInterface.profile": "Use Profile Setting",
   "mihomo.storeSelectedNode": "Store Selected Node",
   "mihomo.storeFakeIp": "Store Fake IP",
   "mihomo.disableLoopbackDetector": "Disable Loopback Detector",

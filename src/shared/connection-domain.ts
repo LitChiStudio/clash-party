@@ -12,6 +12,14 @@ export function normalizeConnectionDomain(host: string): string | undefined {
   }
 }
 
+export function normalizeConnectionDomainPattern(value: string): string | undefined {
+  const pattern = value.trim()
+  if (!pattern.startsWith('*.')) return normalizeConnectionDomain(pattern)
+
+  const domain = normalizeConnectionDomain(pattern.slice(2))
+  return domain?.includes('.') ? `*.${domain}` : undefined
+}
+
 export interface ConnectionDomainRoute {
   profileId: string
   groups: string[]

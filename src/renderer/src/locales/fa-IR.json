@@ -257,6 +257,8 @@
   "mihomo.skipAuthPrefixes": "رد کردن تایید هویت برای بخش‌های IP",
   "mihomo.useRttDelayTest": "استفاده از تست تاخیر 1-RTT",
   "mihomo.tcpConcurrent": "همزمانی TCP",
+  "mihomo.outboundInterface": "رابط شبکهٔ خروجی",
+  "mihomo.outboundInterface.profile": "طبق تنظیمات نمایه",
   "mihomo.storeSelectedNode": "ذخیره گره انتخاب شده",
   "mihomo.storeFakeIp": "ذخیره IP جعلی",
   "mihomo.disableLoopbackDetector": "غیرفعال کردن تشخیص لوپ‌بک",

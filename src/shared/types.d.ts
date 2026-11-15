@@ -534,6 +534,7 @@ interface IMihomoConfig {
   'allow-lan': boolean
   'unified-delay': boolean
   'tcp-concurrent': boolean
+  'interface-name'?: string
   'log-level': LogLevel
   'find-process-mode': FindProcessMode
   'socks-port'?: number

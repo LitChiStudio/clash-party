@@ -4,7 +4,7 @@ import { ruleTargetsPath } from '../utils/dirs'
 import { logger } from '../utils/logger'
 import { atomicWriteFileSync, WriteQueue } from '../utils/safeFile'
 import {
-  normalizeConnectionDomain,
+  normalizeConnectionDomainPattern,
   type ConnectionDomainRoute
 } from '../../shared/connection-domain'
 
@@ -66,6 +66,7 @@ const RULE_TYPE_MAP: Record<string, string> = {
   Domain: 'DOMAIN',
   DomainSuffix: 'DOMAIN-SUFFIX',
   DomainKeyword: 'DOMAIN-KEYWORD',
+  DomainRegex: 'DOMAIN-REGEX',
   DomainFull: 'DOMAIN-FULL',
   IpCidr: 'IP-CIDR',
   SrcIpCidr: 'SRC-IP-CIDR',
@@ -88,6 +89,13 @@ function canonicalRuleType(t: string): string {
   return RULE_TYPE_MAP[t] ?? t.toUpperCase().replace(/ /g, '-')
 }
 
+export function connectionDomainRule(pattern: string): { type: string; payload: string } {
+  if (!pattern.startsWith('*.')) return { type: 'Domain', payload: pattern }
+
+  // Match one or more subdomain labels while excluding the apex domain.
+  return { type: 'DomainRegex', payload: `^.+\\.${pattern.slice(2).replaceAll('.', '\\.')}$` }
+}
+
 // 在生成最终配置时调用：把用户自定义的目标作为具体规则前置注入到 rules 最前。
 // 前置注入使其优先级最高（clash 规则引擎首条匹配即生效），从而覆盖同 payload 的订阅规则。
 // 运行时规则页会按 type+payload 去重并保留优先级最高（index 最小）的条目，避免界面重复显示。
@@ -107,7 +115,13 @@ export async function applyRuleTargets(
   const groups = new Set(Array.isArray(proxyGroups) ? proxyGroups.map(({ name }) => name) : [])
   const domainRules = domains
     .filter(([, group]) => groups.has(group))
-    .map(([domain, group]) => `DOMAIN,${domain},${group}`)
+    .sort(
+      ([a], [b]) => Number(a.startsWith('*.')) - Number(b.startsWith('*.')) || b.length - a.length
+    )
+    .map(([pattern, group]) => {
+      const { type, payload } = connectionDomainRule(pattern)
+      return `${canonicalRuleType(type)},${payload},${group}`
+    })
 
   const injected = Object.entries(targets).map(([key, target]) => {
     const idx = key.indexOf(SEP)
@@ -208,7 +222,7 @@ async function connectionRouteGroups(): Promise<string[]> {
 }
 
 export async function getConnectionDomainRoute(host: string): Promise<ConnectionDomainRoute> {
-  const domain = normalizeConnectionDomain(host)
+  const domain = normalizeConnectionDomainPattern(host)
   if (!domain) throw new Error('Invalid connection domain')
   const profileId = (await currentProfileId()) || 'default'
   const groups = await connectionRouteGroups()
@@ -221,7 +235,7 @@ export async function setConnectionDomainRoute(
   host: string,
   target: string | undefined
 ): Promise<void> {
-  const domain = normalizeConnectionDomain(host)
+  const domain = normalizeConnectionDomainPattern(host)
   if (!domain) throw new Error('Invalid connection domain')
 
   await targetWrites.run(async () => {

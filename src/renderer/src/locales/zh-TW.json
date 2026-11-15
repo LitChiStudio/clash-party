@@ -268,6 +268,8 @@
   "mihomo.skipAuthPrefixes": "允許跳過驗證的 IP 段",
   "mihomo.useRttDelayTest": "使用 1-RTT 延遲測試",
   "mihomo.tcpConcurrent": "TCP 併發",
+  "mihomo.outboundInterface": "出站網路介面",
+  "mihomo.outboundInterface.profile": "沿用設定檔",
   "mihomo.storeSelectedNode": "存儲選擇節點",
   "mihomo.storeFakeIp": "存儲 FakeIP",
   "mihomo.disableLoopbackDetector": "禁用回環檢測器",

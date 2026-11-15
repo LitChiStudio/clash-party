@@ -5,7 +5,7 @@ import { logger } from '../utils/logger'
 import { ruleIdentity } from '../../shared/rule-identity'
 import { getAppConfig } from '../config'
 import { mihomoRules, mihomoRulesDisable } from './mihomoApi'
-import { getConnectionDomainTargets } from './ruleTargets'
+import { connectionDomainRule, getConnectionDomainTargets } from './ruleTargets'
 
 interface ProfileRuleState {
   // 规则身份 -> 是否禁用（仅记录用户显式切换过的规则）
@@ -121,14 +121,18 @@ export async function applyRuleSwitches(profileId?: string): Promise<void> {
 
   const patch: Record<string, boolean> = {}
   const newLastSeen: string[] = []
-  const domainTargets = new Map(Object.entries(getConnectionDomainTargets(current)))
+  const domainTargets = new Set(
+    Object.entries(getConnectionDomainTargets(current)).map(([pattern, group]) => {
+      const { type, payload } = connectionDomainRule(pattern)
+      return ruleIdentity(type, payload, group)
+    })
+  )
   for (let i = 0; i < info.rules.length; i++) {
     const rule = info.rules[i]
     const id = identities[i]
     newLastSeen.push(id)
     // 连接详情显式保存的前置规则始终生效，订阅中同名规则仍遵循原有开关状态。
-    if (rule.type === 'Domain' && domainTargets.get(rule.payload) === rule.proxy) {
-      domainTargets.delete(rule.payload)
+    if (domainTargets.delete(id)) {
       if (rule.extra?.disabled) patch[String(rule.index)] = false
       continue
     }

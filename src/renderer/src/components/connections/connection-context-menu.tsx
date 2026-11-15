@@ -1,6 +1,6 @@
 import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger } from '@heroui/react'
 import { useTranslation } from 'react-i18next'
-import { getConnectionDomains } from '@renderer/utils/connection-visibility'
+import { getConnectionDomainPatterns } from '@renderer/utils/connection-visibility'
 
 interface Props {
   connection: IMihomoConnectionDetail
@@ -24,7 +24,7 @@ export default function ConnectionContextMenu({
   onSetDomainHidden
 }: Props): React.JSX.Element {
   const { t } = useTranslation()
-  const domains = [...getConnectionDomains(connection.metadata)]
+  const domains = [...getConnectionDomainPatterns(connection.metadata)]
   const items = [
     { key: 'details', text: t('connections.detail.title'), run: () => onOpenDetail(connection) },
     ...domains.map((domain) => {
