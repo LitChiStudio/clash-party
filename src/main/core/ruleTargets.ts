@@ -123,10 +123,15 @@ export async function applyRuleTargets(
       return `${canonicalRuleType(type)},${payload},${group}`
     })
 
-  const injected = Object.entries(targets).map(([key, target]) => {
+  let matchTarget: string | undefined
+  const injected = Object.entries(targets).flatMap(([key, target]) => {
     const idx = key.indexOf(SEP)
     const apiType = key.slice(0, idx)
     const payload = key.slice(idx + SEP.length)
+    if (canonicalRuleType(apiType) === 'MATCH') {
+      matchTarget = target
+      return []
+    }
     if (!payload) {
       // 无 payload 的规则（极少见）：直接用规范类型 + 目标兜底
       return `${canonicalRuleType(apiType)},${target}`
@@ -150,13 +155,16 @@ export async function applyRuleTargets(
     return `${canonicalRuleType(apiType)},${payload},${target}`
   })
 
-  const count = domainRules.length + injected.length
+  const count = domainRules.length + injected.length + Number(matchTarget !== undefined)
   if (count > 0) {
-    ;(profile as unknown as Record<string, unknown>).rules = [
-      ...domainRules,
-      ...injected,
-      ...ruleStrs
-    ]
+    const rules = [...domainRules, ...injected, ...ruleStrs]
+    if (matchTarget !== undefined) {
+      // MATCH catches every destination, so preserve the profile's rule order.
+      const index = rules.findIndex((rule) => /^\s*MATCH\s*,/i.test(rule))
+      if (index < 0) rules.push(`MATCH,${matchTarget}`)
+      else rules[index] = `MATCH,${matchTarget}`
+    }
+    ;(profile as unknown as Record<string, unknown>).rules = rules
     logger.info(`[ruleTargets] 前置注入 ${count} 条自定义出站规则 (pid=${pid})`)
   }
   return profile

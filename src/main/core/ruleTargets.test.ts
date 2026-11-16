@@ -175,3 +175,16 @@ it('persists wildcard routes below exact routes and keeps them enabled on reload
     target: undefined
   })
 })
+
+it('changes the catch-all target in place so specific rules still take precedence', async () => {
+  const { applyRuleTargets, mihomoRuleSetTarget } = await import('./ruleTargets')
+  await mihomoRuleSetTarget('Match', undefined, 'GroupB')
+  await mihomoRuleSetTarget('Domain', 'override.test', 'GroupA')
+  const config = await applyRuleTargets(profile('GroupA', 'GroupB'), 'profile-a')
+
+  expect(config.rules).toEqual([
+    'DOMAIN,override.test,GroupA',
+    'DOMAIN-SUFFIX,example.test,GroupA',
+    'MATCH,GroupB'
+  ])
+})
