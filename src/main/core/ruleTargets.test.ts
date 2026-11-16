@@ -9,7 +9,8 @@ const mocks = vi.hoisted(() => ({
   current: 'profile-a',
   hotReload: vi.fn<() => Promise<void>>(),
   rules: vi.fn(),
-  disableRules: vi.fn()
+  disableRules: vi.fn(),
+  tailscaleRules: vi.fn<() => readonly string[]>()
 }))
 
 vi.mock('../utils/dirs', () => ({
@@ -19,6 +20,7 @@ vi.mock('../utils/dirs', () => ({
 vi.mock('../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn() } }))
 vi.mock('../config/profile', () => ({ getProfileConfig: async () => ({ current: mocks.current }) }))
 vi.mock('../config', () => ({ getAppConfig: async () => ({ newRulesDefaultOff: true }) }))
+vi.mock('./factory', () => ({ getRuntimeTailscaleRules: mocks.tailscaleRules }))
 vi.mock('./mihomoApi', () => ({
   mihomoProxies: async () => ({
     proxies: {
@@ -38,6 +40,7 @@ beforeEach(async () => {
   mocks.directory = await mkdtemp(join(tmpdir(), 'connection-domain-rules-'))
   mocks.current = 'profile-a'
   mocks.hotReload.mockResolvedValue(undefined)
+  mocks.tailscaleRules.mockReturnValue([])
 })
 
 afterEach(async () => {
@@ -187,4 +190,28 @@ it('changes the catch-all target in place so specific rules still take precedenc
     'DOMAIN-SUFFIX,example.test,GroupA',
     'MATCH,GroupB'
   ])
+})
+
+it('keeps automatic Tailscale rules active when new subscription rules default to off', async () => {
+  const name = 'Tailscale Direct (Clash Party)'
+  const managed = [
+    { type: 'DomainSuffix', payload: 'ts.net', proxy: name },
+    { type: 'IPCIDR', payload: '100.64.0.0/10', proxy: name },
+    { type: 'IPCIDR', payload: 'fd7a:115c:a1e0::/48', proxy: name }
+  ]
+  await writeFile(
+    join(mocks.directory, 'rule-switches.json'),
+    JSON.stringify({ 'profile-a': { states: {}, lastSeen: [] } })
+  )
+  mocks.tailscaleRules.mockReturnValue(managed.map((r) => ruleIdentity(r.type, r.payload, r.proxy)))
+  mocks.rules.mockResolvedValue({
+    rules: [
+      ...managed.map((rule, index) => ({ ...rule, index, extra: { disabled: index === 0 } })),
+      { type: 'DomainSuffix', payload: 'example.test', proxy: 'GroupA', index: 3 }
+    ]
+  })
+
+  const { applyRuleSwitches } = await import('./ruleSwitches')
+  await applyRuleSwitches('profile-a')
+  expect(mocks.disableRules).toHaveBeenCalledWith({ 0: false, 3: true })
 })

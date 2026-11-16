@@ -6,6 +6,7 @@ import { ruleIdentity } from '../../shared/rule-identity'
 import { getAppConfig } from '../config'
 import { mihomoRules, mihomoRulesDisable } from './mihomoApi'
 import { connectionDomainRule, getConnectionDomainTargets } from './ruleTargets'
+import { getRuntimeTailscaleRules } from './factory'
 
 interface ProfileRuleState {
   // 规则身份 -> 是否禁用（仅记录用户显式切换过的规则）
@@ -121,18 +122,19 @@ export async function applyRuleSwitches(profileId?: string): Promise<void> {
 
   const patch: Record<string, boolean> = {}
   const newLastSeen: string[] = []
-  const domainTargets = new Set(
+  const explicitRuleIds = new Set(
     Object.entries(getConnectionDomainTargets(current)).map(([pattern, group]) => {
       const { type, payload } = connectionDomainRule(pattern)
       return ruleIdentity(type, payload, group)
     })
   )
+  for (const id of getRuntimeTailscaleRules()) explicitRuleIds.add(id)
   for (let i = 0; i < info.rules.length; i++) {
     const rule = info.rules[i]
     const id = identities[i]
     newLastSeen.push(id)
-    // 连接详情显式保存的前置规则始终生效，订阅中同名规则仍遵循原有开关状态。
-    if (domainTargets.delete(id)) {
+    // 显式域名规则和自动生成的 Tailscale 规则应保持启用。
+    if (explicitRuleIds.delete(id)) {
       if (rule.extra?.disabled) patch[String(rule.index)] = false
       continue
     }

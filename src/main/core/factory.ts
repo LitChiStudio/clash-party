@@ -30,12 +30,14 @@ import { compileLocalRuntime } from '../local/service'
 import { isLocalProfile } from '../../shared/local-config'
 import { evaluateDnsOverrideGuard, type DnsOverrideGuardResult } from './dnsOverrideGuard'
 import { applyRuleTargets } from './ruleTargets'
+import { applyTailscaleRouting } from './tailscale-routing'
 
 const factoryLogger = createLogger('Factory')
 const SMART_OVERRIDE_ID = 'smart-core-override'
 
 let runtimeConfigStr: string = ''
 let runtimeConfig: IMihomoConfig = {} as IMihomoConfig
+let runtimeTailscaleRules: readonly string[] = []
 
 interface GenerateProfileOptions {
   profileId?: string
@@ -238,6 +240,7 @@ export async function generateProfile(
     delete partialProfile['external-ui']
     delete partialProfile['external-ui-url']
   }
+  const tailscaleRules = applyTailscaleRouting(profile)
   const nextRuntimeConfigStr = stringify(profile)
   const coreProfile = { ...profile }
   // 日志解析启动检测需要基础日志；预览和 Gist 保留用户的实际配置。
@@ -256,6 +259,7 @@ export async function generateProfile(
   if (options.updateRuntimeConfig !== false) {
     runtimeConfig = profile
     runtimeConfigStr = nextRuntimeConfigStr
+    runtimeTailscaleRules = tailscaleRules
   }
   return { profileId, dnsGuard }
 }
@@ -446,4 +450,8 @@ export async function getRuntimeConfigStr(): Promise<string> {
 
 export async function getRuntimeConfig(): Promise<IMihomoConfig> {
   return runtimeConfig
+}
+
+export function getRuntimeTailscaleRules(): readonly string[] {
+  return runtimeTailscaleRules
 }
